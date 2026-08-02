@@ -1,0 +1,12 @@
+theme = "theme.css"
+
+[components.volume-osd]
+enabled = true
+monitor = "DP-2"
+position = "bottom-center"
+margin = 64
+timeout-ms = 1400
+fade-ms = 160
+step-percent = 1
+limit-percent = 100
+observe-external = true
