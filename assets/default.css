@@ -7,7 +7,7 @@
 /* Structural metrics live here so component code only assigns semantic classes. */
 .atlas-menu-bar {
   min-height: 32px;
-  padding: 0 8px;
+  padding: 0 12px;
   border-bottom: 1px solid @atlas_border;
   background: alpha(@atlas_surface, 0.68);
   color: @atlas_text;
@@ -15,7 +15,7 @@
 }
 
 .atlas-menu-cluster {
-  border-spacing: 4px;
+  border-spacing: 2px;
 }
 
 .atlas-menu-item {
@@ -33,6 +33,21 @@
 .atlas-menu-item:checked {
   background: alpha(@atlas_text, 0.07);
   color: @atlas_text;
+}
+
+.atlas-menu-icon {
+  color: @atlas_text2;
+  transition: 150ms ease-out;
+}
+
+.atlas-menu-item:hover .atlas-menu-icon,
+.atlas-menu-item:checked .atlas-menu-icon {
+  color: @atlas_text;
+}
+
+.atlas-tray-icon {
+  margin: 0 3px;
+  color: @atlas_text2;
 }
 
 .atlas-menu-item:active {
@@ -71,7 +86,7 @@
 
 .atlas-sidebar {
   min-width: 352px;
-  padding: 16px;
+  padding: 20px;
   border: 1px solid @atlas_border;
   border-radius: 18px;
   background: alpha(@atlas_surface, 0.88);
@@ -88,14 +103,14 @@
 
 .atlas-section {
   margin-top: 12px;
-  padding: 12px;
+  padding: 12px 16px 16px;
   border: 1px solid @atlas_border;
   border-radius: 11px;
   background: @atlas_surface2;
 }
 
 .atlas-section-title {
-  margin-bottom: 8px;
+  margin: 4px 0 8px;
   color: @atlas_text3;
   font-family: "IBM Plex Mono", monospace;
   font-size: 11px;
@@ -104,7 +119,7 @@
 }
 
 .atlas-control-tile {
-  min-height: 54px;
+  min-height: 58px;
   margin: 4px;
   padding: 8px 10px;
   border: 1px solid @atlas_border;
@@ -117,6 +132,35 @@
 .atlas-control-tile:hover {
   border-color: @atlas_border_strong;
   background: alpha(@atlas_text, 0.07);
+}
+
+.atlas-control-tile:active {
+  transform: scale(0.97);
+}
+
+.atlas-icon-tile {
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: 8px;
+  background: alpha(@atlas_text, 0.07);
+  color: @atlas_text2;
+}
+
+.atlas-icon-tile.quiet {
+  min-width: 26px;
+  min-height: 26px;
+  background: @atlas_bg2;
+  color: @atlas_text2;
+}
+
+.atlas-icon-tile.accent {
+  background: alpha(@atlas_accent, 0.14);
+  color: @atlas_accent;
+}
+
+.atlas-control-tile:hover .atlas-icon-tile {
+  background: @atlas_accent;
+  color: white;
 }
 
 .atlas-desktop-grid {
@@ -136,6 +180,12 @@
   background: @atlas_widget;
   box-shadow: 0 8px 24px @atlas_shadow;
   color: @atlas_text;
+  transition: 150ms ease-out;
+}
+
+.atlas-tile:hover {
+  border-color: @atlas_border_strong;
+  box-shadow: 0 12px 32px @atlas_shadow;
 }
 
 .atlas-tile.size-1x1 { min-width: 104px; min-height: 104px; }
@@ -148,6 +198,7 @@
   font-family: "Space Grotesk", sans-serif;
   font-size: 32px;
   font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 .atlas-headline {
@@ -189,6 +240,14 @@
   min-height: 26px;
   border-radius: 7px;
   color: @atlas_text2;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  transition: 150ms ease-out;
+}
+
+.atlas-calendar-day:hover {
+  background: alpha(@atlas_text, 0.07);
+  color: @atlas_text;
 }
 
 .atlas-calendar-day.today {
@@ -218,6 +277,7 @@
   border-radius: 18px;
   background: alpha(@atlas_surface, 0.85);
   box-shadow: 0 8px 24px @atlas_shadow;
+  transition: 250ms ease-out;
 }
 
 .atlas-widget,

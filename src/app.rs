@@ -234,7 +234,7 @@ impl Runtime {
                 if let Some(path) = output {
                     self.render_demo(path, app);
                 } else {
-                    self.demo_components(duration);
+                    self.demo_components(duration, app);
                     let app = app.clone();
                     glib::timeout_add_local_once(duration, move || app.quit());
                 }
@@ -342,8 +342,8 @@ impl Runtime {
 
     /// Keep demo orchestration here so each future component can contribute its
     /// own representative state without coupling components to the CLI.
-    fn demo_components(&self, duration: Duration) {
-        self.shell.show();
+    fn demo_components(&self, duration: Duration, app: &gtk::Application) {
+        self.shell.show_demo(app);
         self.osd.demo(duration);
     }
 
@@ -440,12 +440,17 @@ impl Runtime {
         for event in events {
             self.tray_state.apply(event);
         }
-        let count = self.tray_state.visible_items().count();
-        self.shell_state.tray = if count == 0 {
-            String::new()
-        } else {
-            "•".repeat(count.min(6))
-        };
+        self.shell_state.tray_icons = self
+            .tray_state
+            .visible_items()
+            .map(|item| {
+                item.icon
+                    .name
+                    .clone()
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| "application-x-executable-symbolic".to_owned())
+            })
+            .collect();
         self.shell.update(&self.shell_state);
     }
 

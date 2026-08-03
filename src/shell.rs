@@ -30,7 +30,7 @@ pub struct ShellState {
     pub power: String,
     pub privacy: String,
     pub bluetooth: String,
-    pub tray: String,
+    pub tray_icons: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -80,7 +80,7 @@ struct LabelBindings {
     power: Vec<gtk::Label>,
     privacy: Vec<gtk::Label>,
     bluetooth: Vec<gtk::Label>,
-    tray: Vec<gtk::Label>,
+    tray: Vec<gtk::Box>,
 }
 
 impl ShellUi {
@@ -180,7 +180,7 @@ impl ShellUi {
             &self.labels.bluetooth,
             text_or(&state.bluetooth, "Unavailable"),
         );
-        set_all(&self.labels.tray, &state.tray);
+        set_tray_icons(&self.labels.tray, &state.tray_icons);
     }
 
     pub fn show(&self) {
@@ -222,16 +222,7 @@ impl ShellUi {
     }
 
     pub fn render_demo(&self, path: PathBuf, app: gtk::Application) {
-        let gallery = build_demo_gallery();
-        let window = gtk::ApplicationWindow::builder()
-            .application(&app)
-            .default_width(1000)
-            .default_height(760)
-            .decorated(false)
-            .resizable(false)
-            .child(&gallery)
-            .css_classes(["raylander-window"])
-            .build();
+        let (window, gallery) = build_demo_window(&app);
         window.present();
         let attempts = Rc::new(Cell::new(0_u8));
         glib::timeout_add_local(Duration::from_millis(50), move || {
@@ -254,6 +245,12 @@ impl ShellUi {
             app.quit();
             glib::ControlFlow::Break
         });
+    }
+
+    pub fn show_demo(&self, app: &gtk::Application) {
+        let (window, _) = build_demo_window(app);
+        window.set_title(Some("Raylander Component Gallery"));
+        window.present();
     }
 
     pub fn show_notification(&self, notification: &Notification) {
@@ -398,7 +395,7 @@ fn build_bar_cluster(
         .css_classes(["atlas-menu-cluster"])
         .build();
     for item in items {
-        let (button, label) = menu_item(*item);
+        let (button, label, content) = menu_item(*item);
         match item {
             BarItem::ActiveApp => labels.active_app.push(label),
             BarItem::Workspaces => labels.workspaces.push((connector.into(), label)),
@@ -409,7 +406,7 @@ fn build_bar_cluster(
             BarItem::Network => labels.network.push(label),
             BarItem::Notifications => labels.notifications.push(label),
             BarItem::Clock => labels.clocks.push(label),
-            BarItem::Tray => labels.tray.push(label),
+            BarItem::Tray => labels.tray.push(content),
             _ => {}
         }
         match item {
@@ -538,7 +535,7 @@ fn spawn_action(program: &str, args: &[&str]) {
     });
 }
 
-fn menu_item(item: BarItem) -> (gtk::Button, gtk::Label) {
+fn menu_item(item: BarItem) -> (gtk::Button, gtk::Label, gtk::Box) {
     let text = match item {
         BarItem::SystemMenu => "Raylander",
         BarItem::ActiveApp => "Desktop",
@@ -561,11 +558,38 @@ fn menu_item(item: BarItem) -> (gtk::Button, gtk::Label) {
     ) {
         label.add_css_class("atlas-menu-meta");
     }
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .build();
+    if let Some(icon) = bar_item_icon(item) {
+        content.append(
+            &gtk::Image::builder()
+                .icon_name(icon)
+                .pixel_size(14)
+                .css_classes(["atlas-menu-icon"])
+                .build(),
+        );
+    }
+    content.append(&label);
     let button = gtk::Button::builder()
-        .child(&label)
+        .child(&content)
         .css_classes(["atlas-menu-item"])
         .build();
-    (button, label)
+    (button, label, content)
+}
+
+fn bar_item_icon(item: BarItem) -> Option<&'static str> {
+    match item {
+        BarItem::SystemMenu => Some("preferences-system-symbolic"),
+        BarItem::Playing => Some("media-playback-start-symbolic"),
+        BarItem::Packages => Some("software-update-available-symbolic"),
+        BarItem::Tray | BarItem::ActiveApp | BarItem::Workspaces | BarItem::Clock => None,
+        BarItem::InputMethod => Some("input-keyboard-symbolic"),
+        BarItem::Audio => Some("audio-volume-high-symbolic"),
+        BarItem::Network => Some("network-wireless-symbolic"),
+        BarItem::Notifications => Some("preferences-system-notifications-symbolic"),
+    }
 }
 
 fn build_demo_gallery() -> gtk::Box {
@@ -660,6 +684,20 @@ fn build_demo_gallery() -> gtk::Box {
     canvas
 }
 
+fn build_demo_window(app: &gtk::Application) -> (gtk::ApplicationWindow, gtk::Box) {
+    let gallery = build_demo_gallery();
+    let window = gtk::ApplicationWindow::builder()
+        .application(app)
+        .default_width(1000)
+        .default_height(760)
+        .decorated(false)
+        .resizable(false)
+        .child(&gallery)
+        .css_classes(["raylander-window"])
+        .build();
+    (window, gallery)
+}
+
 fn build_banner(app: &gtk::Application) -> Banner {
     let title = gtk::Label::builder()
         .xalign(0.0)
@@ -672,12 +710,22 @@ fn build_banner(app: &gtk::Application) -> Banner {
         .max_width_chars(42)
         .css_classes(["atlas-body"])
         .build();
-    let content = gtk::Box::builder()
+    let copy = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
+        .hexpand(true)
+        .build();
+    copy.append(&title);
+    copy.append(&body);
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
         .css_classes(["atlas-notification"])
         .build();
-    content.append(&title);
-    content.append(&body);
+    content.append(&icon_tile(
+        "preferences-system-notifications-symbolic",
+        "accent",
+    ));
+    content.append(&copy);
     let revealer = gtk::Revealer::builder()
         .transition_type(gtk::RevealerTransitionType::Crossfade)
         .transition_duration(250)
@@ -712,8 +760,14 @@ fn build_banner(app: &gtk::Application) -> Banner {
 
 fn notification_demo() -> gtk::Box {
     let card = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
         .css_classes(["atlas-notification"])
+        .build();
+    card.append(&icon_tile("dialog-information-symbolic", "accent"));
+    let copy = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .hexpand(true)
         .build();
     for (text, class) in [
         ("RAYLANDER  ·  NOW", "atlas-caption"),
@@ -723,7 +777,7 @@ fn notification_demo() -> gtk::Box {
             "atlas-body",
         ),
     ] {
-        card.append(
+        copy.append(
             &gtk::Label::builder()
                 .label(text)
                 .xalign(0.0)
@@ -732,6 +786,7 @@ fn notification_demo() -> gtk::Box {
                 .build(),
         );
     }
+    card.append(&copy);
     card
 }
 
@@ -850,13 +905,20 @@ fn quick_settings() -> gtk::Box {
         .orientation(gtk::Orientation::Vertical)
         .css_classes(["atlas-section"])
         .build();
-    container.append(
+    let header = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    header.append(&icon_tile("preferences-system-symbolic", "quiet"));
+    header.append(
         &gtk::Label::builder()
             .label("QUICK SETTINGS")
             .xalign(0.0)
+            .hexpand(true)
             .css_classes(["atlas-section-title"])
             .build(),
     );
+    container.append(&header);
     let grid = gtk::Grid::builder()
         .column_homogeneous(true)
         .row_homogeneous(true)
@@ -896,7 +958,7 @@ fn quick_button(icon: &str, label: &str) -> gtk::Button {
         .orientation(gtk::Orientation::Horizontal)
         .spacing(8)
         .build();
-    content.append(&gtk::Image::from_icon_name(icon));
+    content.append(&icon_tile(icon, "accent"));
     content.append(
         &gtk::Label::builder()
             .label(label)
@@ -941,13 +1003,20 @@ fn sidebar_section(section: SidebarSection) -> (gtk::Box, gtk::Label) {
         .orientation(gtk::Orientation::Vertical)
         .css_classes(["atlas-section"])
         .build();
-    container.append(
+    let header = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    header.append(&icon_tile(sidebar_icon(section), "quiet"));
+    header.append(
         &gtk::Label::builder()
             .label(title)
             .xalign(0.0)
+            .hexpand(true)
             .css_classes(["atlas-section-title"])
             .build(),
     );
+    container.append(&header);
     let body = gtk::Label::builder()
         .label(body)
         .xalign(0.0)
@@ -956,6 +1025,16 @@ fn sidebar_section(section: SidebarSection) -> (gtk::Box, gtk::Label) {
         .build();
     container.append(&body);
     (container, body)
+}
+
+fn sidebar_icon(section: SidebarSection) -> &'static str {
+    match section {
+        SidebarSection::QuickSettings => "preferences-system-symbolic",
+        SidebarSection::Playing => "media-playback-start-symbolic",
+        SidebarSection::Calendar => "x-office-calendar-symbolic",
+        SidebarSection::Packages => "software-update-available-symbolic",
+        SidebarSection::Notifications => "preferences-system-notifications-symbolic",
+    }
 }
 
 fn build_desktops(
@@ -1021,13 +1100,20 @@ fn desktop_tile(widget: &DesktopWidgetConfig, labels: &mut LabelBindings) -> gtk
         .css_classes(["atlas-tile", widget.presentation.css_class()])
         .build();
     let title = component_title(widget.component);
-    tile.append(
+    let header = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    header.append(&icon_tile(component_icon(widget.component), "quiet"));
+    header.append(
         &gtk::Label::builder()
             .label(title.to_uppercase())
             .xalign(0.0)
+            .hexpand(true)
             .css_classes(["atlas-caption"])
             .build(),
     );
+    tile.append(&header);
     if matches!(widget.component, ComponentId::Calendar) {
         let date = gtk::Label::builder()
             .label("Today")
@@ -1072,6 +1158,37 @@ fn desktop_tile(widget: &DesktopWidgetConfig, labels: &mut LabelBindings) -> gtk
     }
     tile.append(&value);
     tile
+}
+
+fn icon_tile(icon: &str, tone: &str) -> gtk::Box {
+    let tile = gtk::Box::builder()
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .css_classes(["atlas-icon-tile"])
+        .build();
+    tile.add_css_class(tone);
+    tile.append(&gtk::Image::builder().icon_name(icon).pixel_size(16).build());
+    tile
+}
+
+fn component_icon(component: ComponentId) -> &'static str {
+    match component {
+        ComponentId::Playing => "media-playback-start-symbolic",
+        ComponentId::Clock => "alarm-symbolic",
+        ComponentId::Calendar => "x-office-calendar-symbolic",
+        ComponentId::Notifications => "preferences-system-notifications-symbolic",
+        ComponentId::Audio => "audio-volume-high-symbolic",
+        ComponentId::Network => "network-wireless-symbolic",
+        ComponentId::Packages => "software-update-available-symbolic",
+        ComponentId::InputMethod => "input-keyboard-symbolic",
+        ComponentId::SystemHealth => "computer-symbolic",
+        ComponentId::Storage => "drive-harddisk-symbolic",
+        ComponentId::Display => "video-display-symbolic",
+        ComponentId::Power => "battery-symbolic",
+        ComponentId::Privacy => "security-high-symbolic",
+        ComponentId::Bluetooth => "bluetooth-symbolic",
+        ComponentId::Weather => "weather-clear-symbolic",
+    }
 }
 
 fn calendar_grid() -> Option<gtk::Grid> {
@@ -1186,6 +1303,24 @@ fn update_clock_labels(clocks: &[gtk::Label], dates: &[gtk::Label]) {
 fn set_all(labels: &[gtk::Label], value: &str) {
     for label in labels {
         label.set_label(value);
+    }
+}
+
+fn set_tray_icons(containers: &[gtk::Box], icons: &[String]) {
+    for container in containers {
+        while let Some(child) = container.first_child() {
+            container.remove(&child);
+        }
+        for icon in icons.iter().take(8) {
+            container.append(
+                &gtk::Image::builder()
+                    .icon_name(icon)
+                    .pixel_size(16)
+                    .tooltip_text(icon)
+                    .css_classes(["atlas-tray-icon"])
+                    .build(),
+            );
+        }
     }
 }
 
