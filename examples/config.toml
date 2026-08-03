@@ -1,4 +1,5 @@
 theme = "theme.css"
+color-scheme = "system" # system, light, or dark
 
 [components.volume-osd]
 enabled = true

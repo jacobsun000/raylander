@@ -22,6 +22,14 @@ cargo install --path . --locked
 raylander daemon
 ```
 
+Alternatively, use the installation helper. Atlas CSS assets are embedded into
+the installed binary; if a Raylander daemon is already running, the helper
+restarts it with the newly installed build. It does not start a stopped daemon.
+
+```sh
+./scripts/install.sh
+```
+
 Raylander is a single-instance GTK application. Later commands are forwarded to
 the running process:
 
@@ -30,9 +38,18 @@ raylander volume up
 raylander volume down
 raylander volume mute
 raylander volume show
+raylander demo -t 5s
 raylander reload
 raylander quit
 ```
+
+`raylander demo` previews every implemented component using representative data.
+The duration accepts human-friendly values such as `500ms`, `5s`, or `2m` and
+defaults to five seconds. Currently the demo shows the volume OSD; future
+components will be added to the same preview command. Raylander exits when the
+demo duration ends, including when the command is forwarded to a running daemon.
+Use `raylander demo --output preview.png` to render the same GTK/CSS preview to a
+PNG without showing it on screen; image mode exits immediately after capture.
 
 Recommended Hyprland configuration:
 
@@ -50,6 +67,14 @@ Raylander reads `$XDG_CONFIG_HOME/raylander/config.toml`, falling back to
 Copy [`examples/config.toml`](examples/config.toml) and
 [`examples/theme.css`](examples/theme.css) to that directory to customize it.
 Relative theme paths are resolved from the Raylander configuration directory.
+
+The embedded theme implements the Atlas Desktop UI System and includes light and
+dark semantic token sets. Set `color-scheme` to `system`, `light`, or `dark`;
+`system` follows GTK's current appearance when Raylander starts or reloads.
+Atlas colors are centralized in `assets/atlas-light.css` and
+`assets/atlas-dark.css`, while shared component recipes live in
+`assets/default.css`. New components should use semantic `@atlas_*` colors and
+Atlas recipe classes instead of embedding palette values.
 
 The stable CSS hooks are `.raylander-window`, `.volume-osd`, `.volume-icon`,
 `.volume-percent`, and `.volume-bar`. Run `raylander reload` after editing either

@@ -1,38 +1,40 @@
+/* Atlas component recipes. Colors come from atlas-{light,dark}.css. */
 .raylander-window {
   background: transparent;
 }
 
+.atlas-widget,
 .volume-osd {
   min-width: 288px;
   min-height: 42px;
-  padding: 13px 18px;
-  border: 1px solid rgba(91, 96, 120, 0.85);
+  padding: 16px 24px;
+  border: 1px solid @atlas_border;
   border-radius: 18px;
-  background: rgba(36, 39, 58, 0.94);
-  box-shadow: 0 8px 28px rgba(17, 17, 27, 0.55);
-  color: #cad3f5;
+  background: @atlas_widget;
+  box-shadow: 0 8px 24px @atlas_shadow;
+  color: @atlas_text;
 }
 
 .volume-icon {
-  color: #8bd5ca;
+  color: @atlas_accent;
 }
 
 .volume-percent {
-  color: #cad3f5;
-  font-family: "Noto Sans", sans-serif;
-  font-size: 15px;
-  font-weight: 650;
+  color: @atlas_text;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
 .volume-bar trough {
-  min-height: 7px;
+  min-height: 6px;
   border-radius: 999px;
-  background: #494d64;
+  background: @atlas_bg2;
 }
 
 .volume-bar progress {
-  min-height: 7px;
+  min-height: 6px;
   border-radius: 999px;
-  background: #8bd5ca;
+  background: @atlas_accent;
 }

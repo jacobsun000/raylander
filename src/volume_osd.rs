@@ -1,73 +1,13 @@
-use std::{cell::Cell, fs, rc::Rc, time::Duration};
+use std::{cell::Cell, path::PathBuf, rc::Rc, time::Duration};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use gtk::{gdk, glib, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::{
     audio::VolumeState,
-    config::{Config, Position, VolumeOsdConfig, theme_path},
+    config::{Position, VolumeOsdConfig},
 };
-
-const DEFAULT_CSS: &str = include_str!("../assets/default.css");
-
-pub struct ThemeManager {
-    display: gdk::Display,
-    user_provider: Option<gtk::CssProvider>,
-}
-
-impl ThemeManager {
-    pub fn new(config: &Config) -> Self {
-        let display = gdk::Display::default().expect("a Wayland display is required");
-        let defaults = gtk::CssProvider::new();
-        defaults.load_from_string(DEFAULT_CSS);
-        gtk::style_context_add_provider_for_display(
-            &display,
-            &defaults,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-        let mut manager = Self {
-            display,
-            user_provider: None,
-        };
-        if let Err(error) = manager.reload(config) {
-            tracing::warn!(%error, "using embedded theme");
-        }
-        manager
-    }
-
-    pub fn reload(&mut self, config: &Config) -> Result<()> {
-        let path = theme_path(config);
-        if !path.exists() {
-            if let Some(provider) = self.user_provider.take() {
-                gtk::style_context_remove_provider_for_display(&self.display, &provider);
-            }
-            return Ok(());
-        }
-        let css = fs::read_to_string(&path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        let provider = gtk::CssProvider::new();
-        let invalid = Rc::new(Cell::new(false));
-        let invalid_signal = Rc::clone(&invalid);
-        provider.connect_parsing_error(move |_, section, error| {
-            invalid_signal.set(true);
-            tracing::error!(section = ?section, %error, "invalid theme CSS");
-        });
-        provider.load_from_string(&css);
-        if invalid.get() {
-            bail!("theme {} contains invalid CSS", path.display());
-        }
-        gtk::style_context_add_provider_for_display(
-            &self.display,
-            &provider,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
-        );
-        if let Some(previous) = self.user_provider.replace(provider) {
-            gtk::style_context_remove_provider_for_display(&self.display, &previous);
-        }
-        Ok(())
-    }
-}
 
 pub struct VolumeOsd {
     window: gtk::ApplicationWindow,
@@ -99,7 +39,7 @@ impl VolumeOsd {
         let row = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(16)
-            .css_classes(["volume-osd"])
+            .css_classes(["atlas-widget", "volume-osd"])
             .build();
         row.append(&icon);
         row.append(&progress);
@@ -173,9 +113,73 @@ impl VolumeOsd {
     }
 
     pub fn show(&self, state: VolumeState) {
-        if !self.config.enabled {
+        self.show_for(state, Duration::from_millis(self.config.timeout_ms), false);
+    }
+
+    pub fn demo(&self, duration: Duration) {
+        self.show_for(
+            VolumeState {
+                percent: 67,
+                muted: false,
+            },
+            duration,
+            true,
+        );
+    }
+
+    pub fn render_demo(&self, path: PathBuf, app: gtk::Application) {
+        self.set_state(VolumeState {
+            percent: 67,
+            muted: false,
+        });
+        self.revealer.set_transition_duration(0);
+        self.revealer.set_reveal_child(true);
+        self.window.set_layer(Layer::Background);
+        self.window.present();
+
+        let window = self.window.clone();
+        // Wait for one compositor frame so GTK has allocated and styled the widget.
+        glib::timeout_add_local_once(Duration::from_millis(50), move || {
+            match render_widget_to_png(&window, &window, &path) {
+                Ok(()) => tracing::info!(path = %path.display(), "rendered demo image"),
+                Err(error) => {
+                    tracing::error!(path = %path.display(), %error, "failed to render demo image")
+                }
+            }
+            app.quit();
+        });
+    }
+
+    fn show_for(&self, state: VolumeState, duration: Duration, force: bool) {
+        if !force && !self.config.enabled {
             return;
         }
+        self.set_state(state);
+
+        let generation = self.generation.get().wrapping_add(1);
+        self.generation.set(generation);
+        self.revealer.set_reveal_child(true);
+        self.window.present();
+
+        let revealer = self.revealer.clone();
+        let window = self.window.clone();
+        let current = Rc::clone(&self.generation);
+        let fade_ms = self.config.fade_ms;
+        glib::timeout_add_local_once(duration, move || {
+            if current.get() != generation {
+                return;
+            }
+            revealer.set_reveal_child(false);
+            let current = Rc::clone(&current);
+            glib::timeout_add_local_once(Duration::from_millis(u64::from(fade_ms)), move || {
+                if current.get() == generation {
+                    window.set_visible(false);
+                }
+            });
+        });
+    }
+
+    fn set_state(&self, state: VolumeState) {
         let icon = if state.muted || state.percent == 0 {
             "audio-volume-muted-symbolic"
         } else if state.percent <= 33 {
@@ -195,27 +199,25 @@ impl VolumeOsd {
                 f64::from(state.percent) / f64::from(self.config.limit_percent.max(1)),
             );
         }
-
-        let generation = self.generation.get().wrapping_add(1);
-        self.generation.set(generation);
-        self.revealer.set_reveal_child(true);
-        self.window.present();
-
-        let revealer = self.revealer.clone();
-        let window = self.window.clone();
-        let current = Rc::clone(&self.generation);
-        let fade_ms = self.config.fade_ms;
-        glib::timeout_add_local_once(Duration::from_millis(self.config.timeout_ms), move || {
-            if current.get() != generation {
-                return;
-            }
-            revealer.set_reveal_child(false);
-            let current = Rc::clone(&current);
-            glib::timeout_add_local_once(Duration::from_millis(u64::from(fade_ms)), move || {
-                if current.get() == generation {
-                    window.set_visible(false);
-                }
-            });
-        });
     }
+}
+
+fn render_widget_to_png(
+    window: &gtk::ApplicationWindow,
+    widget: &impl IsA<gtk::Widget>,
+    path: &std::path::Path,
+) -> Result<()> {
+    let width = widget.width();
+    let height = widget.height();
+    anyhow::ensure!(width > 0 && height > 0, "demo widget has not been laid out");
+
+    let paintable = gtk::WidgetPaintable::new(Some(widget));
+    let snapshot = gtk::Snapshot::new();
+    paintable.snapshot(&snapshot, f64::from(width), f64::from(height));
+    let node = snapshot.to_node().context("demo snapshot was empty")?;
+    let renderer = window.renderer().context("GTK renderer is unavailable")?;
+    let texture = renderer.render_texture(&node, Some(&node.bounds()));
+    texture
+        .save_to_png(path)
+        .with_context(|| format!("failed to save {}", path.display()))
 }

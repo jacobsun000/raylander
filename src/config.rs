@@ -7,7 +7,17 @@ use serde::Deserialize;
 #[serde(default, rename_all = "kebab-case")]
 pub struct Config {
     pub theme: PathBuf,
+    pub color_scheme: ColorScheme,
     pub components: ComponentsConfig,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ColorScheme {
+    #[default]
+    System,
+    Light,
+    Dark,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -42,6 +52,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             theme: PathBuf::from("theme.css"),
+            color_scheme: ColorScheme::System,
             components: ComponentsConfig::default(),
         }
     }
@@ -142,5 +153,12 @@ mod tests {
         assert_eq!(config.components.volume_osd.monitor, "HDMI-A-1");
         assert_eq!(config.components.volume_osd.timeout_ms, 900);
         assert_eq!(config.components.volume_osd.step_percent, 1);
+        assert_eq!(config.color_scheme, ColorScheme::System);
+    }
+
+    #[test]
+    fn parses_atlas_color_scheme() {
+        let config: Config = toml::from_str("color-scheme = \"light\"").unwrap();
+        assert_eq!(config.color_scheme, ColorScheme::Light);
     }
 }

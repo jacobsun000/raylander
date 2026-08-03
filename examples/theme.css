@@ -1,18 +1,12 @@
-/* Loaded after Raylander's embedded defaults; override only what you want. */
+/* Loaded after Atlas. Override stable component hooks only where needed. */
 .volume-osd {
-  background: rgba(36, 39, 58, 0.94);
-  border-color: rgba(91, 96, 120, 0.85);
-  color: #cad3f5;
+  /* Example: background: alpha(#16181e, 0.96); */
 }
 
 .volume-icon {
-  color: #8bd5ca;
+  /* Atlas alternate accent: color: #7c5cff; */
 }
 
 .volume-bar progress {
-  background: #8bd5ca;
-}
-
-.volume-percent {
-  color: #cad3f5;
+  /* Keep this aligned with .volume-icon when overriding the accent. */
 }

@@ -13,7 +13,8 @@ use crate::{
     audio::{AudioObserver, VolumeState, WpctlBackend},
     cli::{Cli, Command, VolumeCommand},
     config::{self, Config},
-    volume_osd::{ThemeManager, VolumeOsd},
+    theme::ThemeManager,
+    volume_osd::VolumeOsd,
 };
 
 const APP_ID: &str = "io.raylander.Raylander";
@@ -138,6 +139,16 @@ impl Runtime {
         match command {
             Command::Daemon => Ok(()),
             Command::Volume { command } => self.handle_volume(command),
+            Command::Demo { duration, output } => {
+                if let Some(path) = output {
+                    self.render_demo(path, app);
+                } else {
+                    self.demo_components(duration);
+                    let app = app.clone();
+                    glib::timeout_add_local_once(duration, move || app.quit());
+                }
+                Ok(())
+            }
             Command::Reload => self.reload(),
             Command::Quit => {
                 app.quit();
@@ -154,6 +165,16 @@ impl Runtime {
         self.last_state = Some(state);
         self.osd.show(state);
         Ok(())
+    }
+
+    /// Keep demo orchestration here so each future component can contribute its
+    /// own representative state without coupling components to the CLI.
+    fn demo_components(&self, duration: Duration) {
+        self.osd.demo(duration);
+    }
+
+    fn render_demo(&self, path: std::path::PathBuf, app: &gtk::Application) {
+        self.osd.render_demo(path, app.clone());
     }
 
     fn poll_observer(&mut self) {

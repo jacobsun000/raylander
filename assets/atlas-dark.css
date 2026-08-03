@@ -1,0 +1,16 @@
+/* Atlas semantic color tokens — dark appearance. */
+@define-color atlas_bg #0b0c0f;
+@define-color atlas_bg2 #111319;
+@define-color atlas_surface #16181e;
+@define-color atlas_surface2 #1d2029;
+@define-color atlas_border alpha(#ffffff, 0.09);
+@define-color atlas_border_strong alpha(#ffffff, 0.18);
+@define-color atlas_text #f1f2f5;
+@define-color atlas_text2 #a6acb9;
+@define-color atlas_text3 #666d7b;
+@define-color atlas_accent #0a7cff;
+@define-color atlas_success #22a857;
+@define-color atlas_warning #e8a13a;
+@define-color atlas_danger #e5484d;
+@define-color atlas_widget alpha(#16181e, 0.80);
+@define-color atlas_shadow alpha(#000000, 0.45);
