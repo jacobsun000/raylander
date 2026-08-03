@@ -12,7 +12,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 
-use crate::cli::VolumeCommand;
+use crate::cli::{MicCommand, VolumeCommand};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VolumeState {
@@ -42,8 +42,39 @@ impl WpctlBackend {
     }
 
     pub fn current(&self) -> Result<VolumeState> {
+        self.current_target("@DEFAULT_AUDIO_SINK@")
+    }
+
+    pub fn apply_microphone(
+        &self,
+        command: MicCommand,
+        step: u16,
+        limit: u16,
+    ) -> Result<VolumeState> {
+        match command {
+            MicCommand::Up => self.run_set(&[
+                "set-volume",
+                "-l",
+                &format!("{:.2}", f64::from(limit) / 100.0),
+                "@DEFAULT_AUDIO_SOURCE@",
+                &format!("{step}%+"),
+            ])?,
+            MicCommand::Down => {
+                self.run_set(&["set-volume", "@DEFAULT_AUDIO_SOURCE@", &format!("{step}%-")])?
+            }
+            MicCommand::Mute => self.run_set(&["set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"])?,
+            MicCommand::Show => {}
+        }
+        self.current_target("@DEFAULT_AUDIO_SOURCE@")
+    }
+
+    pub fn current_microphone(&self) -> Result<VolumeState> {
+        self.current_target("@DEFAULT_AUDIO_SOURCE@")
+    }
+
+    fn current_target(&self, target: &str) -> Result<VolumeState> {
         let output = Command::new("wpctl")
-            .args(["get-volume", "@DEFAULT_AUDIO_SINK@"])
+            .args(["get-volume", target])
             .output()
             .context("failed to execute wpctl get-volume")?;
         if !output.status.success() {

@@ -14,6 +14,7 @@ pub struct ThemeManager {
     display: gdk::Display,
     atlas_provider: gtk::CssProvider,
     user_provider: Option<gtk::CssProvider>,
+    reduce_transparency: bool,
 }
 
 impl ThemeManager {
@@ -29,26 +30,40 @@ impl ThemeManager {
             display,
             atlas_provider,
             user_provider: None,
+            reduce_transparency: config.reduce_transparency,
         };
         if let Err(error) = manager.reload(config) {
             tracing::warn!(%error, "using embedded Atlas theme");
-            manager.load_atlas(ColorScheme::Dark);
+            manager.load_atlas(ColorScheme::Dark, config.reduce_transparency);
         }
         manager
     }
 
     pub fn reload(&mut self, config: &Config) -> Result<()> {
-        self.load_atlas(resolve_scheme(config.color_scheme));
+        self.reduce_transparency = config.reduce_transparency;
+        self.load_atlas(
+            resolve_scheme(config.color_scheme),
+            self.reduce_transparency,
+        );
         self.reload_user_css(config)
     }
 
-    fn load_atlas(&self, scheme: ColorScheme) {
+    pub fn preview_scheme(&self, scheme: ColorScheme) {
+        self.load_atlas(scheme, self.reduce_transparency);
+    }
+
+    fn load_atlas(&self, scheme: ColorScheme, reduce_transparency: bool) {
         let tokens = match scheme {
             ColorScheme::Light => ATLAS_LIGHT,
             ColorScheme::Dark | ColorScheme::System => ATLAS_DARK,
         };
+        let solid = if reduce_transparency {
+            ".atlas-menu-bar,.atlas-sidebar,.atlas-tile,.atlas-notification,.atlas-menu{background:@atlas_surface;}"
+        } else {
+            ""
+        };
         self.atlas_provider
-            .load_from_string(&format!("{tokens}\n{COMPONENTS}"));
+            .load_from_string(&format!("{tokens}\n{COMPONENTS}\n{solid}"));
     }
 
     fn reload_user_css(&mut self, config: &Config) -> Result<()> {

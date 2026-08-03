@@ -10,3 +10,13 @@
 .volume-bar progress {
   /* Keep this aligned with .volume-icon when overriding the accent. */
 }
+
+/* Shell surfaces and tiles expose stable semantic hooks too. */
+.atlas-menu-bar {
+  /* Example: background: alpha(#16181e, 0.92); */
+}
+
+.atlas-sidebar,
+.atlas-tile {
+  /* Geometry, type, and surfaces can be replaced without Rust changes. */
+}

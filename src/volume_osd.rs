@@ -1,6 +1,5 @@
-use std::{cell::Cell, path::PathBuf, rc::Rc, time::Duration};
+use std::{cell::Cell, rc::Rc, time::Duration};
 
-use anyhow::{Context, Result};
 use gtk::{gdk, glib, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
@@ -116,6 +115,27 @@ impl VolumeOsd {
         self.show_for(state, Duration::from_millis(self.config.timeout_ms), false);
     }
 
+    pub fn show_microphone(&self, state: VolumeState) {
+        if !self.config.enabled {
+            return;
+        }
+        self.icon.set_icon_name(Some(if state.muted {
+            "microphone-disabled-symbolic"
+        } else {
+            "audio-input-microphone-symbolic"
+        }));
+        if state.muted {
+            self.label.set_label("Muted");
+            self.progress.set_fraction(0.0);
+        } else {
+            self.label.set_label(&format!("{}%", state.percent));
+            self.progress.set_fraction(
+                f64::from(state.percent) / f64::from(self.config.limit_percent.max(1)),
+            );
+        }
+        self.reveal_for(Duration::from_millis(self.config.timeout_ms));
+    }
+
     pub fn demo(&self, duration: Duration) {
         self.show_for(
             VolumeState {
@@ -127,35 +147,16 @@ impl VolumeOsd {
         );
     }
 
-    pub fn render_demo(&self, path: PathBuf, app: gtk::Application) {
-        self.set_state(VolumeState {
-            percent: 67,
-            muted: false,
-        });
-        self.revealer.set_transition_duration(0);
-        self.revealer.set_reveal_child(true);
-        self.window.set_layer(Layer::Background);
-        self.window.present();
-
-        let window = self.window.clone();
-        // Wait for one compositor frame so GTK has allocated and styled the widget.
-        glib::timeout_add_local_once(Duration::from_millis(50), move || {
-            match render_widget_to_png(&window, &window, &path) {
-                Ok(()) => tracing::info!(path = %path.display(), "rendered demo image"),
-                Err(error) => {
-                    tracing::error!(path = %path.display(), %error, "failed to render demo image")
-                }
-            }
-            app.quit();
-        });
-    }
-
     fn show_for(&self, state: VolumeState, duration: Duration, force: bool) {
         if !force && !self.config.enabled {
             return;
         }
         self.set_state(state);
 
+        self.reveal_for(duration);
+    }
+
+    fn reveal_for(&self, duration: Duration) {
         let generation = self.generation.get().wrapping_add(1);
         self.generation.set(generation);
         self.revealer.set_reveal_child(true);
@@ -200,24 +201,4 @@ impl VolumeOsd {
             );
         }
     }
-}
-
-fn render_widget_to_png(
-    window: &gtk::ApplicationWindow,
-    widget: &impl IsA<gtk::Widget>,
-    path: &std::path::Path,
-) -> Result<()> {
-    let width = widget.width();
-    let height = widget.height();
-    anyhow::ensure!(width > 0 && height > 0, "demo widget has not been laid out");
-
-    let paintable = gtk::WidgetPaintable::new(Some(widget));
-    let snapshot = gtk::Snapshot::new();
-    paintable.snapshot(&snapshot, f64::from(width), f64::from(height));
-    let node = snapshot.to_node().context("demo snapshot was empty")?;
-    let renderer = window.renderer().context("GTK renderer is unavailable")?;
-    let texture = renderer.render_texture(&node, Some(&node.bounds()));
-    texture
-        .save_to_png(path)
-        .with_context(|| format!("failed to save {}", path.display()))
 }

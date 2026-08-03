@@ -1,5 +1,6 @@
 theme = "theme.css"
 color-scheme = "system" # system, light, or dark
+reduce-transparency = false
 
 [components.volume-osd]
 enabled = true
@@ -11,3 +12,59 @@ fade-ms = 160
 step-percent = 1
 limit-percent = 100
 observe-external = true
+
+[components.menu-bar]
+enabled = true
+monitors = ["*"]
+left = ["system-menu", "active-app"]
+center = ["workspaces"]
+right = [
+  "playing",
+  "packages",
+  "input-method",
+  "tray",
+  "audio",
+  "network",
+  "notifications",
+  "clock",
+]
+
+[components.sidebar]
+enabled = true
+monitor = "focused"
+sections = ["quick-settings", "playing", "calendar", "packages", "notifications"]
+
+[components.desktop]
+enabled = true
+
+[[components.desktop.widgets]]
+component = "playing"
+monitor = "DP-2"
+presentation = "2x1"
+column = 0
+row = 0
+
+[[components.desktop.widgets]]
+component = "clock"
+monitor = "DP-2"
+presentation = "2x1"
+column = 2
+row = 0
+
+[[components.desktop.widgets]]
+component = "system-health"
+monitor = "DP-2"
+presentation = "2x1"
+column = 0
+row = 1
+
+[[components.desktop.widgets]]
+component = "calendar"
+monitor = "DP-2"
+presentation = "2x2"
+column = 2
+row = 1
+
+[components.notifications]
+enabled = true
+history-limit = 100

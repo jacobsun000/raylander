@@ -1,8 +1,22 @@
 mod app;
 mod audio;
+pub mod bluetooth;
+pub mod calendar;
 mod cli;
 mod config;
+pub mod display;
+pub mod input_method;
+pub mod media;
+pub mod network;
+pub mod notification_service;
+pub mod notifications;
+pub mod packages;
+pub mod power;
+mod shell;
+mod shell_sources;
 mod theme;
+pub mod tray;
+pub mod tray_service;
 mod volume_osd;
 
 pub use app::run;

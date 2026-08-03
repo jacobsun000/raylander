@@ -1,8 +1,9 @@
 # Raylander
 
-Raylander is a long-running, Wayland-native home for small desktop utilities. The
-first component is a volume OSD for Hyprland; future components can add their own
-system adapter, state, commands, and layer-shell window without sharing UI logic.
+Raylander is a long-running, Wayland-native desktop shell and home for small
+utilities. It provides Atlas-styled per-monitor menu bars, a unified sidebar,
+desktop widgets, and the original volume OSD for Hyprland. Components share typed
+state while keeping system adapters and GTK views isolated.
 
 ## Requirements
 
@@ -38,12 +39,18 @@ raylander volume up
 raylander volume down
 raylander volume mute
 raylander volume show
+raylander mic mute
+raylander sidebar toggle notifications
+raylander media play-pause
+raylander input next
+raylander packages refresh
+raylander notifications dnd toggle
 raylander demo -t 5s
 raylander reload
 raylander quit
 ```
 
-`raylander demo` previews every implemented component using representative data.
+`raylander demo` previews the implemented shell surfaces using representative data.
 The duration accepts human-friendly values such as `500ms`, `5s`, or `2m` and
 defaults to five seconds. Currently the demo shows the volume OSD; future
 components will be added to the same preview command. Raylander exits when the
@@ -76,9 +83,12 @@ Atlas colors are centralized in `assets/atlas-light.css` and
 `assets/default.css`. New components should use semantic `@atlas_*` colors and
 Atlas recipe classes instead of embedding palette values.
 
-The stable CSS hooks are `.raylander-window`, `.volume-osd`, `.volume-icon`,
-`.volume-percent`, and `.volume-bar`. Run `raylander reload` after editing either
-file. An invalid reload keeps the previously active configuration and theme.
+The stable CSS hooks include `.raylander-window`, `.atlas-menu-bar`,
+`.atlas-sidebar`, `.atlas-tile`, `.volume-osd`, `.volume-icon`, `.volume-percent`,
+and `.volume-bar`. Run `raylander reload` after editing either file. An invalid
+reload keeps the previously active configuration and theme. See
+[`docs/desktop-shell.md`](docs/desktop-shell.md) for the architecture and
+presentation contracts.
 
 ## Architecture
 
@@ -87,6 +97,8 @@ file. An invalid reload keeps the previously active configuration and theme.
 - `audio` isolates `wpctl` control/query behavior and the restartable `pactl`
   event observer.
 - `volume_osd` owns only its layer-shell window and visual state.
+- `shell` owns menu-bar, sidebar, and desktop-widget GTK surfaces.
+- `shell_sources` supervises blocking current-machine status adapters away from GTK.
 - `config` owns XDG discovery, defaults, validation, and component settings.
 
 New components should follow the same boundary: add a typed command, isolate any

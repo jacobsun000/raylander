@@ -1,6 +1,223 @@
 /* Atlas component recipes. Colors come from atlas-{light,dark}.css. */
 .raylander-window {
   background: transparent;
+  color: @atlas_text;
+}
+
+/* Structural metrics live here so component code only assigns semantic classes. */
+.atlas-menu-bar {
+  min-height: 32px;
+  padding: 0 8px;
+  border-bottom: 1px solid @atlas_border;
+  background: alpha(@atlas_surface, 0.68);
+  color: @atlas_text;
+  font-size: 13px;
+}
+
+.atlas-menu-cluster {
+  border-spacing: 4px;
+}
+
+.atlas-menu-item {
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 7px;
+  color: @atlas_text2;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  transition: 150ms ease-out;
+}
+
+.atlas-menu-item:hover,
+.atlas-menu-item:checked {
+  background: alpha(@atlas_text, 0.07);
+  color: @atlas_text;
+}
+
+.atlas-menu-item:active {
+  transform: scale(0.97);
+}
+
+.atlas-menu {
+  padding: 4px;
+  border: 1px solid @atlas_border;
+  border-radius: 11px;
+  background: alpha(@atlas_surface, 0.92);
+  box-shadow: 0 8px 24px @atlas_shadow;
+}
+
+.atlas-destructive {
+  color: @atlas_danger;
+  background: alpha(@atlas_danger, 0.12);
+}
+
+.atlas-app-name {
+  color: @atlas_text;
+  font-weight: 600;
+}
+
+.atlas-menu-meta,
+.atlas-caption,
+.atlas-value {
+  font-family: "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.atlas-menu-meta {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.atlas-sidebar {
+  min-width: 352px;
+  padding: 16px;
+  border: 1px solid @atlas_border;
+  border-radius: 18px;
+  background: alpha(@atlas_surface, 0.88);
+  box-shadow: 0 28px 70px @atlas_shadow;
+  transition: 250ms ease-out;
+}
+
+.atlas-sidebar-header {
+  margin-bottom: 8px;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.atlas-section {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid @atlas_border;
+  border-radius: 11px;
+  background: @atlas_surface2;
+}
+
+.atlas-section-title {
+  margin-bottom: 8px;
+  color: @atlas_text3;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+
+.atlas-control-tile {
+  min-height: 54px;
+  margin: 4px;
+  padding: 8px 10px;
+  border: 1px solid @atlas_border;
+  border-radius: 11px;
+  background: @atlas_surface;
+  color: @atlas_text;
+  transition: 150ms ease-out;
+}
+
+.atlas-control-tile:hover {
+  border-color: @atlas_border_strong;
+  background: alpha(@atlas_text, 0.07);
+}
+
+.atlas-desktop-grid {
+  padding: 8px;
+}
+
+.atlas-grid-slot {
+  min-width: 144px;
+  min-height: 144px;
+  margin: 8px;
+}
+
+.atlas-tile {
+  padding: 20px;
+  border: 1px solid @atlas_border;
+  border-radius: 18px;
+  background: @atlas_widget;
+  box-shadow: 0 8px 24px @atlas_shadow;
+  color: @atlas_text;
+}
+
+.atlas-tile.size-1x1 { min-width: 104px; min-height: 104px; }
+.atlas-tile.size-1x2 { min-width: 104px; min-height: 264px; }
+.atlas-tile.size-2x1 { min-width: 264px; min-height: 104px; }
+.atlas-tile.size-2x2 { min-width: 264px; min-height: 264px; }
+
+.atlas-display {
+  color: @atlas_text;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 32px;
+  font-weight: 600;
+}
+
+.atlas-headline {
+  color: @atlas_text;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.atlas-body {
+  color: @atlas_text2;
+  font-size: 13px;
+}
+
+.atlas-caption {
+  color: @atlas_text3;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+
+.atlas-value {
+  color: @atlas_text;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.atlas-badge {
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: @atlas_danger;
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.atlas-calendar-day {
+  min-width: 26px;
+  min-height: 26px;
+  border-radius: 7px;
+  color: @atlas_text2;
+}
+
+.atlas-calendar-day.today {
+  background: @atlas_accent;
+  color: white;
+}
+
+.atlas-divider {
+  min-height: 1px;
+  background: @atlas_border;
+}
+
+.atlas-demo-canvas {
+  padding: 32px;
+  background: @atlas_bg;
+}
+
+.atlas-demo-body {
+  margin-top: 24px;
+  border-spacing: 24px;
+}
+
+.atlas-notification {
+  min-width: 298px;
+  padding: 16px;
+  border: 1px solid @atlas_border;
+  border-radius: 18px;
+  background: alpha(@atlas_surface, 0.85);
+  box-shadow: 0 8px 24px @atlas_shadow;
 }
 
 .atlas-widget,
