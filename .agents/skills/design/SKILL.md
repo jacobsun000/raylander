@@ -1,5 +1,5 @@
 ---
-name: Atlas Desktop UI System
+name: atlas desktop ui system
 description: For building desktop utilities (menu bars, widgets, launchers, panels, settings) in the Atlas visual language.
 ---
 
