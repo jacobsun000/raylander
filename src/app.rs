@@ -139,6 +139,7 @@ fn run_preview(
             if let Some(path) = output.clone() {
                 shell.render_demo(path, app.clone());
             } else {
+                shell.show();
                 shell.show_demo(app);
                 osd.demo(duration);
                 let app = app.clone();
