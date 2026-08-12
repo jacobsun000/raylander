@@ -48,8 +48,8 @@ pub enum Command {
         #[command(subcommand)]
         command: PackagesCommand,
     },
-    /// Preview every available desktop component for a fixed time.
-    Demo {
+    /// Preview current build without connecting to the running daemon.
+    Preview {
         /// How long the preview remains visible (for example: 500ms, 5s, 2m).
         #[arg(short = 't', long, default_value = "5s", value_parser = parse_duration)]
         duration: Duration,
@@ -58,7 +58,7 @@ pub enum Command {
         output: Option<PathBuf>,
         /// Override the configured appearance for this preview.
         #[arg(long, value_enum)]
-        color_scheme: Option<DemoColorScheme>,
+        color_scheme: Option<PreviewColorScheme>,
     },
     /// Reload configuration and theme files.
     Reload,
@@ -139,7 +139,7 @@ pub enum PackagesCommand {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub enum DemoColorScheme {
+pub enum PreviewColorScheme {
     Light,
     Dark,
 }
@@ -173,58 +173,18 @@ mod tests {
     }
 
     #[test]
-    fn parses_demo_duration() {
-        let cli = Cli::try_parse_from(["raylander", "demo", "-t", "5s"]).unwrap();
+    fn parses_standalone_preview() {
+        let cli =
+            Cli::try_parse_from(["raylander", "preview", "-t", "2s", "--color-scheme", "dark"])
+                .unwrap();
         assert!(matches!(
             cli.command,
-            Command::Demo {
+            Command::Preview {
                 duration,
                 output: None,
-                ..
-            } if duration == Duration::from_secs(5)
+                color_scheme: Some(PreviewColorScheme::Dark),
+            } if duration == Duration::from_secs(2)
         ));
-    }
-
-    #[test]
-    fn demo_defaults_to_five_seconds() {
-        let cli = Cli::try_parse_from(["raylander", "demo"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Demo {
-                duration,
-                output: None,
-                ..
-            } if duration == Duration::from_secs(5)
-        ));
-    }
-
-    #[test]
-    fn parses_demo_output() {
-        let cli = Cli::try_parse_from(["raylander", "demo", "-o", "preview.png"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Demo {
-                output: Some(path),
-                ..
-            } if path == PathBuf::from("preview.png")
-        ));
-    }
-
-    #[test]
-    fn parses_demo_color_scheme() {
-        let cli = Cli::try_parse_from(["raylander", "demo", "--color-scheme", "light"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Demo {
-                color_scheme: Some(DemoColorScheme::Light),
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn rejects_zero_demo_duration() {
-        assert!(Cli::try_parse_from(["raylander", "demo", "-t", "0s"]).is_err());
     }
 
     #[test]

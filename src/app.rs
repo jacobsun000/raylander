@@ -14,8 +14,8 @@ use gtk::{gio, glib, prelude::*};
 use crate::{
     audio::{AudioObserver, VolumeState, WpctlBackend},
     cli::{
-        Cli, Command, DemoColorScheme, InputCommand, MediaCommand, MicCommand,
-        NotificationsCommand, PackagesCommand, SidebarCommand, SidebarSection, ToggleState,
+        Cli, Command, InputCommand, MediaCommand, MicCommand, NotificationsCommand,
+        PackagesCommand, PreviewColorScheme, SidebarCommand, SidebarSection, ToggleState,
         VolumeCommand,
     },
     config::{self, Config},
@@ -40,6 +40,16 @@ pub fn run() -> glib::ExitCode {
         .with_target(false)
         .compact()
         .init();
+
+    let cli = Cli::parse();
+    if let Command::Preview {
+        duration,
+        output,
+        color_scheme,
+    } = cli.command
+    {
+        return run_preview(duration, output, color_scheme);
+    }
 
     let app = gtk::Application::builder()
         .application_id(APP_ID)
@@ -94,6 +104,53 @@ pub fn run() -> glib::ExitCode {
         runtime.borrow_mut().take();
     });
     app.run()
+}
+
+/// Run previews in this process so `cargo run -- preview` always displays the
+/// just-compiled UI, even while an older daemon owns the main application ID.
+fn run_preview(
+    duration: Duration,
+    output: Option<PathBuf>,
+    color_scheme: Option<PreviewColorScheme>,
+) -> glib::ExitCode {
+    let app = gtk::Application::builder()
+        .application_id("io.raylander.Raylander.Preview")
+        .flags(gio::ApplicationFlags::NON_UNIQUE)
+        .build();
+    let preview = Rc::new(RefCell::new(None));
+
+    app.connect_startup({
+        let preview = Rc::clone(&preview);
+        move |app| {
+            let config = config::load().unwrap_or_else(|error| {
+                tracing::error!(%error, "invalid configuration; using defaults");
+                Config::default()
+            });
+            let theme = ThemeManager::new(&config);
+            if let Some(scheme) = color_scheme {
+                theme.preview_scheme(match scheme {
+                    PreviewColorScheme::Light => crate::config::ColorScheme::Light,
+                    PreviewColorScheme::Dark => crate::config::ColorScheme::Dark,
+                });
+            }
+            let shell = ShellUi::new(app, &config);
+            let osd = VolumeOsd::new(app, &config.components.volume_osd);
+
+            if let Some(path) = output.clone() {
+                shell.render_demo(path, app.clone());
+            } else {
+                shell.show_demo(app);
+                osd.demo(duration);
+                let app = app.clone();
+                glib::timeout_add_local_once(duration, move || app.quit());
+            }
+            *preview.borrow_mut() = Some((theme, shell, osd));
+        }
+    });
+    app.connect_shutdown(move |_| {
+        preview.borrow_mut().take();
+    });
+    app.run_with_args(&["raylander-preview"])
 }
 
 struct Runtime {
@@ -220,25 +277,8 @@ impl Runtime {
                 self.handle_packages(command);
                 Ok(())
             }
-            Command::Demo {
-                duration,
-                output,
-                color_scheme,
-            } => {
-                if let Some(scheme) = color_scheme {
-                    self.theme.preview_scheme(match scheme {
-                        DemoColorScheme::Light => crate::config::ColorScheme::Light,
-                        DemoColorScheme::Dark => crate::config::ColorScheme::Dark,
-                    });
-                }
-                if let Some(path) = output {
-                    self.render_demo(path, app);
-                } else {
-                    self.demo_components(duration, app);
-                    let app = app.clone();
-                    glib::timeout_add_local_once(duration, move || app.quit());
-                }
-                Ok(())
+            Command::Preview { .. } => {
+                anyhow::bail!("preview must run in the local process")
             }
             Command::Reload => self.reload(),
             Command::Quit => {
@@ -338,17 +378,6 @@ impl Runtime {
         match command {
             PackagesCommand::Refresh => self._shell_observer.refresh_packages(),
         }
-    }
-
-    /// Keep demo orchestration here so each future component can contribute its
-    /// own representative state without coupling components to the CLI.
-    fn demo_components(&self, duration: Duration, app: &gtk::Application) {
-        self.shell.show_demo(app);
-        self.osd.demo(duration);
-    }
-
-    fn render_demo(&self, path: std::path::PathBuf, app: &gtk::Application) {
-        self.shell.render_demo(path, app.clone());
     }
 
     fn poll_observer(&mut self) {

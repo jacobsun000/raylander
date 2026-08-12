@@ -45,18 +45,17 @@ raylander media play-pause
 raylander input next
 raylander packages refresh
 raylander notifications dnd toggle
-raylander demo -t 5s
+raylander preview -t 5s
 raylander reload
 raylander quit
 ```
 
-`raylander demo` previews the implemented shell surfaces using representative data.
-The duration accepts human-friendly values such as `500ms`, `5s`, or `2m` and
-defaults to five seconds. Currently the demo shows the volume OSD; future
-components will be added to the same preview command. Raylander exits when the
-demo duration ends, including when the command is forwarded to a running daemon.
-Use `raylander demo --output preview.png` to render the same GTK/CSS preview to a
-PNG without showing it on screen; image mode exits immediately after capture.
+For UI development, use `cargo run -- preview`: it runs the just-compiled code in
+a separate local process and does not contact or stop an older daemon. The
+duration accepts human-friendly values such as `500ms`, `5s`, or `2m` and
+defaults to five seconds. Use `cargo run -- preview --output preview.png` to render
+the GTK/CSS preview to a PNG without showing it on screen; image mode exits after
+capture. `./run.sh` starts a ten-second interactive preview.
 
 Recommended Hyprland configuration:
 

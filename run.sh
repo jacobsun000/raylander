@@ -1,1 +1,1 @@
-cargo run demo -t 2s
+cargo run -- preview -t 10s
