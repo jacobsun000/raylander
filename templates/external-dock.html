@@ -7,6 +7,9 @@
   const post = path => fetch(path, {method: "POST"});
   const closeDialog = dialog => {if(!dialog.open||dialog.classList.contains("closing"))return;if(dialog.id==='media-dialog')post('/media-visualizer/false');dialog.classList.add("closing");setTimeout(()=>{dialog.close();dialog.classList.remove("closing")},240)};
   const openMedia=()=>{document.querySelector('#media-dialog').showModal();post('/media-visualizer/true')};
+  let awakeUntil=Number(localStorage.getItem('raylander-awake-until')||0),awakeTimer;
+  const renderAwake=()=>{const button=document.querySelector('#awake-control');if(!button)return;const left=Math.max(0,awakeUntil-Date.now());button.classList.toggle('active',left>0);button.querySelector('small').textContent=left?`${Math.ceil(left/60000)}m`:'';clearTimeout(awakeTimer);if(left)awakeTimer=setTimeout(renderAwake,Math.min(60000,left+50));else localStorage.removeItem('raylander-awake-until')};
+  const keepAwake=()=>{const active=awakeUntil>Date.now();awakeUntil=active?0:Date.now()+30*60*1000;if(active){localStorage.removeItem('raylander-awake-until');post('/awake/false')}else{localStorage.setItem('raylander-awake-until',awakeUntil);post('/awake/true')}renderAwake()};
   const openAgents=()=>document.querySelector("#agent-dialog").showModal();
   const focusAgent=id=>{fetch(`/agent/focus/${encodeURIComponent(id)}`,{method:"POST"});closeDialog(document.querySelector("#agent-dialog"))};
   const bluetoothCommand=(action,button)=>{button.disabled=true;fetch(`/bluetooth/${action}`,{method:"POST"}).finally(()=>setTimeout(()=>button.disabled=false,600))};
@@ -71,7 +74,7 @@
     document.addEventListener("pointerdown",e=>{const monitor=e.target.closest("#monitors .monitor-view");if(!monitor)return;const x=e.clientX;monitor.setPointerCapture(e.pointerId);monitor.onpointerup=up=>{const delta=up.clientX-x,base=Number(monitor.dataset.base),active=Number(monitor.dataset.active);const steps=Math.min(8,Math.floor(Math.abs(delta)/25));let target=active;if(steps)target=Math.max(base,Math.min(base+8,active+(delta<0?steps:-steps)));post(`/workspace/${target}`)}});
     fetchWeather("minneapolis");
   };
-  document.addEventListener("DOMContentLoaded",()=>{for(const id of ["timer-hour","timer-minute","timer-second"]){const el=document.querySelector(`#${id}`),max=id==="timer-hour"?23:59;el.innerHTML=`<i></i>${[...Array(max+1)].map((_,i)=>`<b>${String(i).padStart(2,"0")}</b>`).join("")}<i></i>`}updateClock();setInterval(updateClock,1000);syncDisplayPower();bindGestures();new MutationObserver(syncDisplayPower).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:["data-on"]})});
+  document.addEventListener("DOMContentLoaded",()=>{for(const id of ["timer-hour","timer-minute","timer-second"]){const el=document.querySelector(`#${id}`),max=id==="timer-hour"?23:59;el.innerHTML=`<i></i>${[...Array(max+1)].map((_,i)=>`<b>${String(i).padStart(2,"0")}</b>`).join("")}<i></i>`}updateClock();setInterval(updateClock,1000);syncDisplayPower();bindGestures();renderAwake();if(awakeUntil>Date.now())post('/awake/true');new MutationObserver(syncDisplayPower).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:["data-on"]})});
   document.addEventListener("htmx:wsClose",()=>console.warn("Dock WebSocket closed; HTMX will reconnect"));
   </script>
 </head>
@@ -91,7 +94,7 @@
     <span id="bluetooth-control" class="control-icon" title="Bluetooth" onclick="document.querySelector('#bluetooth-dialog').showModal()"><svg viewBox="0 0 24 24"><path d="M12 2v20M12 2l7 6-7 5M12 22l7-6-7-5M5 7l14 9M5 17 19 8"/></svg></span>
     <span id="network-control" class="control-icon" title="Wi-Fi" onclick="document.querySelector('#network-dialog').showModal()"><svg viewBox="0 0 24 24"><path d="M4 10a13 13 0 0 1 16 0M8 15a6.5 6.5 0 0 1 8 0"/><circle cx="12" cy="19" r="1.4"/></svg></span>
     <span id="input-control" class="control-icon input-icon" title="Input method" onclick="fetch('/input-method/toggle',{method:'POST'})">A</span>
-    <button id="screenshot-control" class="control-icon screenshot-control" title="Screenshot" onclick="fetch('/screenshot',{method:'POST'})"><svg viewBox="0 0 24 24"><path d="M4 8V5h3M17 5h3v3M20 16v3h-3M7 19H4v-3"/><rect x="7" y="8" width="10" height="8" rx="2"/><circle cx="12" cy="12" r="2.25"/></svg></button>
+    <button id="awake-control" class="control-icon awake-control relative" title="Keep screen awake for 30 minutes" onclick="keepAwake()"><svg viewBox="0 0 24 24"><path d="M4 8V5h3M17 5h3v3M20 16v3h-3M7 19H4v-3"/><rect x="7" y="8" width="10" height="8" rx="2"/><circle cx="12" cy="12" r="2.25"/></svg><small></small></button>
   </section>
   <section id="packages-card" class="card"><p class="label">Updates</p><p id="packages-total" class="big-number">—</p><div class="chips"><span id="packages-pacman" title="Official packages">◆ —</span><span id="packages-paru" title="AUR packages">▲ —</span></div></section>
   <section id="focus-card" class="card"><div id="monitors" class="monitor-layout"><p class="focus-title">Desktop</p><div class="monitor-grid"><div class="monitor-view" data-base="1" data-active="1"><div class="workspace-dots"><i class="active focused"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div></div></section>

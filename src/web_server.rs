@@ -4,10 +4,10 @@ use std::{
     io::{BufRead, BufReader},
     net::SocketAddr,
     os::unix::net::UnixStream,
-    process::Command,
+    process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex, OnceLock,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     thread::{self, JoinHandle},
@@ -58,6 +58,8 @@ static CALENDAR_EVENTS: OnceLock<Mutex<Vec<CalendarEvent>>> = OnceLock::new();
 static SPECTRUM: OnceLock<Mutex<[u8; 16]>> = OnceLock::new();
 static ARTWORK_CACHE: OnceLock<Mutex<HashMap<u64, Vec<u8>>>> = OnceLock::new();
 static SPECTRUM_ACTIVE: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+static AWAKE_GENERATION: AtomicU64 = AtomicU64::new(0);
+static AWAKE_INHIBITOR: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
 static DASHBOARD_SNAPSHOT: OnceLock<Mutex<String>> = OnceLock::new();
 
 #[derive(Default)]
@@ -211,7 +213,7 @@ fn router() -> Router {
         .route("/media-visualizer/{active}", post(set_visualizer_active))
         .route("/volume/{percent}", post(set_volume))
         .route("/brightness/{percent}", post(set_brightness))
-        .route("/screenshot", post(open_screenshot))
+        .route("/awake/{active}", post(set_awake))
         .route("/input-method/toggle", post(toggle_input_method))
         .route("/bluetooth/power", post(bluetooth_power))
         .route("/bluetooth/scan", post(bluetooth_scan))
@@ -362,17 +364,56 @@ async fn toggle_input_method() -> StatusCode {
     }
 }
 
-async fn open_screenshot() -> StatusCode {
-    match tokio::task::spawn_blocking(|| {
-        Command::new("hyprctl")
-            .args(["dispatch", "hl.plugin.hyprcapture.open"])
-            .status()
+async fn set_awake(axum::extract::Path(active): axum::extract::Path<bool>) -> StatusCode {
+    let generation = AWAKE_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+    let started = tokio::task::spawn_blocking(move || {
+        let inhibitor = AWAKE_INHIBITOR.get_or_init(|| Mutex::new(None));
+        let mut inhibitor = inhibitor.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(mut child) = inhibitor.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        if !active {
+            return Ok(());
+        }
+        let _ = Command::new("hyprctl")
+            .args(["dispatch", "dpms on"])
+            .status();
+        *inhibitor = Some(
+            Command::new("systemd-inhibit")
+                .args([
+                    "--what=idle",
+                    "--mode=block",
+                    "--who=Raylander",
+                    "--why=30-minute awake timer",
+                    "sleep",
+                    "1800",
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()?,
+        );
+        Ok::<_, std::io::Error>(())
     })
-    .await
-    {
-        Ok(Ok(status)) if status.success() => StatusCode::NO_CONTENT,
-        _ => StatusCode::SERVICE_UNAVAILABLE,
+    .await;
+    if !matches!(started, Ok(Ok(()))) {
+        return StatusCode::SERVICE_UNAVAILABLE;
     }
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(30 * 60)).await;
+        if AWAKE_GENERATION.load(Ordering::Relaxed) == generation
+            && let Some(mut child) = AWAKE_INHIBITOR
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .take()
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    });
+    StatusCode::NO_CONTENT
 }
 
 async fn focus_agent_by_id(

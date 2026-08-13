@@ -15,7 +15,9 @@
   #bluetooth-control svg { @apply size-[21px]; stroke-width:2.4; }
   .control-icon svg circle { fill:currentColor; stroke:none; }
   .input-icon { @apply font-sans text-2xl font-semibold leading-none; }
-  .screenshot-control { @apply bg-[#e8782f] text-white; }
+  .awake-control { @apply bg-[#343740] text-white transition-colors duration-300; }
+  .awake-control.active { @apply bg-[#e8782f]; }
+  .awake-control small { @apply absolute bottom-1 font-mono text-[7px] font-semibold leading-none; }
   .connectivity-dialog[open] .connectivity-panel { animation:agent-dialog-enter .25s ease-out both; }
   .connectivity-dialog.closing .connectivity-panel { animation:agent-dialog-exit .24s ease-in both; }
   .connectivity-panel { @apply grid h-full grid-cols-[150px_1fr] overflow-hidden rounded-[18px] border border-white/10 bg-[#16181e] shadow-2xl; }
