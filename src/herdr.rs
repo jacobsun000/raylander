@@ -8,6 +8,7 @@ pub struct AgentStatus {
     pub workspace: String,
     pub pane: String,
     pub pane_id: String,
+    pub workspace_number: u32,
     pub status: String,
 }
 
@@ -36,6 +37,7 @@ struct WorkspaceList {
 #[derive(Deserialize)]
 struct Workspace {
     label: String,
+    number: u32,
     workspace_id: String,
 }
 
@@ -44,11 +46,11 @@ pub struct HerdrBackend;
 impl HerdrBackend {
     pub fn agents(&self) -> Result<Vec<AgentStatus>> {
         let workspaces: Response<WorkspaceList> = query(&["workspace", "list"])?;
-        let labels: HashMap<_, _> = workspaces
+        let workspaces: HashMap<_, _> = workspaces
             .result
             .workspaces
             .into_iter()
-            .map(|workspace| (workspace.workspace_id, workspace.label))
+            .map(|workspace| (workspace.workspace_id, (workspace.label, workspace.number)))
             .collect();
         let agents: Response<AgentList> = query(&["agent", "list"])?;
         let mut agents = agents
@@ -56,15 +58,18 @@ impl HerdrBackend {
             .agents
             .into_iter()
             .map(|agent| AgentStatus {
-                workspace: labels
+                workspace: workspaces
                     .get(&agent.workspace_id)
-                    .cloned()
-                    .unwrap_or(agent.workspace_id),
+                    .map(|(label, _)| label.clone())
+                    .unwrap_or_else(|| agent.workspace_id.clone()),
                 pane: agent
                     .pane_id
                     .rsplit_once(":p")
                     .map_or(agent.pane_id.clone(), |(_, pane)| pane.to_owned()),
                 pane_id: agent.pane_id,
+                workspace_number: workspaces
+                    .get(&agent.workspace_id)
+                    .map_or(1, |(_, number)| *number),
                 status: agent.agent_status,
             })
             .collect::<Vec<_>>();
@@ -72,13 +77,23 @@ impl HerdrBackend {
         Ok(agents)
     }
 
-    pub fn focus(&self, pane_id: &str) -> Result<()> {
+    pub fn focus(&self, pane_id: &str, workspace_number: u32) -> Result<()> {
         let output = Command::new("herdr")
             .args(["agent", "focus", pane_id])
             .output()
             .context("failed to execute herdr")?;
         if !output.status.success() {
             bail!("herdr agent focus failed");
+        }
+        let status = Command::new("hyprctl")
+            .args([
+                "dispatch",
+                &format!("hl.dsp.focus({{workspace={workspace_number}}})"),
+            ])
+            .status()
+            .context("failed to execute hyprctl")?;
+        if !status.success() {
+            bail!("hyprctl workspace focus failed");
         }
         Ok(())
     }

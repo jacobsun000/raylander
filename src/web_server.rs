@@ -377,7 +377,7 @@ async fn set_awake(axum::extract::Path(active): axum::extract::Path<bool>) -> St
             return Ok(());
         }
         let _ = Command::new("hyprctl")
-            .args(["dispatch", "dpms on"])
+            .args(["dispatch", "hl.dsp.dpms(\"on\")"])
             .status();
         *inhibitor = Some(
             Command::new("systemd-inhibit")
@@ -419,8 +419,21 @@ async fn set_awake(axum::extract::Path(active): axum::extract::Path<bool>) -> St
 async fn focus_agent_by_id(
     axum::extract::Path(pane_id): axum::extract::Path<String>,
 ) -> StatusCode {
+    let workspace_number = AGENT_STATE.get().and_then(|state| {
+        state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .agents
+            .iter()
+            .find(|agent| agent.pane_id == pane_id)
+            .map(|agent| agent.workspace_number)
+    });
+    let Some(workspace_number) = workspace_number else {
+        return StatusCode::NOT_FOUND;
+    };
     let focus_id = pane_id.clone();
-    match tokio::task::spawn_blocking(move || HerdrBackend.focus(&focus_id)).await {
+    match tokio::task::spawn_blocking(move || HerdrBackend.focus(&focus_id, workspace_number)).await
+    {
         Ok(Ok(())) => {
             if let Some(state) = AGENT_STATE.get() {
                 let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
@@ -446,7 +459,7 @@ async fn focus_agent_by_id(
 }
 
 async fn focus_agent() -> StatusCode {
-    let pane_id = AGENT_STATE.get().and_then(|state| {
+    let agent = AGENT_STATE.get().and_then(|state| {
         let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
         let pane_id = state
             .agents
@@ -463,12 +476,18 @@ async fn focus_agent() -> StatusCode {
         {
             agent.status = "idle".to_owned();
         }
-        Some(pane_id)
+        let workspace_number = state
+            .agents
+            .iter()
+            .find(|agent| agent.pane_id == pane_id)
+            .map_or(1, |agent| agent.workspace_number);
+        Some((pane_id, workspace_number))
     });
-    let Some(pane_id) = pane_id else {
+    let Some((pane_id, workspace_number)) = agent else {
         return StatusCode::NO_CONTENT;
     };
-    match tokio::task::spawn_blocking(move || HerdrBackend.focus(&pane_id)).await {
+    match tokio::task::spawn_blocking(move || HerdrBackend.focus(&pane_id, workspace_number)).await
+    {
         Ok(Ok(())) => {
             emit(DockEvent::Agents);
             StatusCode::NO_CONTENT
