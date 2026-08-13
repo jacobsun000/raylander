@@ -37,7 +37,15 @@ const HTMX: &str = include_str!("../assets/web/htmx.min.js");
 const HTMX_WS: &str = include_str!("../assets/web/htmx-ext-ws.js");
 const ARCH_LOGO: &[u8] = include_bytes!("../assets/web/arch-logo.png");
 static WEATHER_COORDS: OnceLock<(String, String)> = OnceLock::new();
-static EVENTS: OnceLock<broadcast::Sender<()>> = OnceLock::new();
+static EVENTS: OnceLock<broadcast::Sender<DockEvent>> = OnceLock::new();
+
+#[derive(Clone, Copy, Debug)]
+enum DockEvent {
+    Volume,
+    Media,
+    InputMethod,
+    Hyprland,
+}
 
 #[derive(Template)]
 #[template(path = "external-dock.html")]
@@ -189,11 +197,17 @@ async fn websocket(upgrade: WebSocketUpgrade) -> impl IntoResponse {
 async fn send_time(mut socket: WebSocket) {
     let Some(events) = EVENTS.get() else { return };
     let mut events = events.subscribe();
+    let initial = tokio::task::spawn_blocking(dashboard_fragment)
+        .await
+        .unwrap_or_default();
+    if socket.send(Message::Text(initial.into())).await.is_err() {
+        return;
+    }
     loop {
-        if events.recv().await.is_err() {
+        let Ok(event) = events.recv().await else {
             break;
-        }
-        let fragment = tokio::task::spawn_blocking(dashboard_fragment)
+        };
+        let fragment = tokio::task::spawn_blocking(move || event_fragment(event))
             .await
             .unwrap_or_default();
         if socket.send(Message::Text(fragment.into())).await.is_err() {
@@ -202,27 +216,30 @@ async fn send_time(mut socket: WebSocket) {
     }
 }
 
-fn start_event_sources(events: broadcast::Sender<()>) {
+fn start_event_sources(events: broadcast::Sender<DockEvent>) {
     let (observer, audio_events) = AudioObserver::start();
     thread::spawn(move || {
         let _observer = observer;
         while audio_events.recv().is_ok() {
-            let _ = events.send(());
+            let _ = events.send(DockEvent::Volume);
         }
     });
-    observe_command([
-        "playerctl",
-        "--all-players",
-        "metadata",
-        "--follow",
-        "--format",
-        "{{status}} {{xesam:title}}",
-    ]);
+    observe_command(
+        DockEvent::Media,
+        [
+            "playerctl",
+            "--all-players",
+            "metadata",
+            "--follow",
+            "--format",
+            "{{status}} {{xesam:title}}",
+        ],
+    );
     observe_input_method();
     observe_hyprland();
 }
 
-fn observe_command<const N: usize>(command: [&'static str; N]) {
+fn observe_command<const N: usize>(event: DockEvent, command: [&'static str; N]) {
     thread::spawn(move || {
         loop {
             let Some(events) = EVENTS.get() else { return };
@@ -240,7 +257,7 @@ fn observe_command<const N: usize>(command: [&'static str; N]) {
                     if line.is_err() {
                         break;
                     }
-                    let _ = events.send(());
+                    let _ = events.send(event);
                 }
             }
             let _ = child.wait();
@@ -257,7 +274,7 @@ fn observe_input_method() {
             if previous.as_ref() != current.as_ref() {
                 previous = current;
                 if let Some(events) = EVENTS.get() {
-                    let _ = events.send(());
+                    let _ = events.send(DockEvent::InputMethod);
                 }
             }
             thread::sleep(Duration::from_millis(500));
@@ -286,7 +303,7 @@ fn observe_hyprland() {
                 if (line.starts_with("activewindow") || line.starts_with("workspace"))
                     && let Some(events) = EVENTS.get()
                 {
-                    let _ = events.send(());
+                    let _ = events.send(DockEvent::Hyprland);
                 }
             }
         }
@@ -337,6 +354,68 @@ fn cached_fragment(
         cache.updated_at = Some(Instant::now());
     }
     cache.value.clone()
+}
+
+fn event_fragment(event: DockEvent) -> String {
+    match event {
+        DockEvent::Volume => volume_fragment(),
+        DockEvent::Media => media_fragment(),
+        DockEvent::InputMethod => input_method_fragment(),
+        DockEvent::Hyprland => hyprland_oob_fragment(),
+    }
+}
+
+fn volume_fragment() -> String {
+    let Ok(volume) = WpctlBackend.current() else {
+        return String::new();
+    };
+    let percent = if volume.muted {
+        0
+    } else {
+        volume.percent.min(100)
+    };
+    let mut html = String::new();
+    flash_value(&mut html, "volume", &format!("{percent}%"));
+    html.push_str(&format!(r#"<div id="volume-fill" class="ios-fill bg-[#f1f2f5]" hx-swap-oob="outerHTML" style="height:{percent}%"></div>"#));
+    html
+}
+
+fn input_method_fragment() -> String {
+    let input = Fcitx5Backend.current().ok();
+    let class = match input.as_ref().map(|state| &state.status) {
+        Some(InputMethodStatus::Active) => "control-icon active font-mono text-[10px]",
+        Some(InputMethodStatus::Inactive) => "control-icon font-mono text-[10px]",
+        _ => "control-icon warning font-mono text-[10px]",
+    };
+    let label = input
+        .and_then(|state| state.name)
+        .map(|name| if name.contains("pinyin") { "中" } else { "A" })
+        .unwrap_or("?");
+    let mut html = String::new();
+    class_replace(&mut html, "input-control", class, label);
+    html
+}
+
+fn hyprland_oob_fragment() -> String {
+    let mut html = String::new();
+    if let Some(monitors) = hyprland_fragment() {
+        raw_replace(&mut html, "monitors", &monitors);
+    }
+    html
+}
+
+fn media_fragment() -> String {
+    let mut html = String::new();
+    match PlayerctlBackend.current() {
+        Ok(Some(media)) => {
+            html.push_str(r#"<div id="media-empty" class="media-empty hidden" hx-swap-oob="outerHTML"></div><div id="media-copy" class="media-copy" hx-swap-oob="outerHTML"><p id="media-title" class="value truncate"></p><p id="media-artist" class="truncate text-[9px] text-[#a6acb9]"></p><div class="media-controls"><button onclick="fetch('/media/previous',{method:'POST'})" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button><button onclick="fetch('/media/play-pause',{method:'POST'})" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg></button><button onclick="fetch('/media/next',{method:'POST'})" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 5l9 7-9 7z"/></svg></button></div></div>"#);
+            replace(&mut html, "media-title", &media.title);
+            replace(&mut html, "media-artist", &media.artists.join(", "));
+            if media.artwork_url.is_some() { html.push_str(r#"<img id="media-art" src="/artwork" alt="" hx-swap-oob="outerHTML" onerror="this.hidden=true" onload="this.hidden=false">"#); }
+        }
+        _ => html.push_str(r#"<img id="media-art" hidden hx-swap-oob="outerHTML" alt=""><div id="media-empty" class="media-empty" hx-swap-oob="outerHTML" aria-hidden="true"><img src="/assets/arch-logo.png" alt=""></div><div id="media-copy" class="media-copy hidden" hx-swap-oob="outerHTML"></div>"#),
+    }
+    html
 }
 
 fn dashboard_fragment() -> String {
