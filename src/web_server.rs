@@ -376,9 +376,6 @@ async fn set_awake(axum::extract::Path(active): axum::extract::Path<bool>) -> St
         if !active {
             return Ok(());
         }
-        let _ = Command::new("hyprctl")
-            .args(["dispatch", "hl.dsp.dpms(\"on\")"])
-            .status();
         *inhibitor = Some(
             Command::new("systemd-inhibit")
                 .args([
@@ -419,21 +416,8 @@ async fn set_awake(axum::extract::Path(active): axum::extract::Path<bool>) -> St
 async fn focus_agent_by_id(
     axum::extract::Path(pane_id): axum::extract::Path<String>,
 ) -> StatusCode {
-    let workspace_number = AGENT_STATE.get().and_then(|state| {
-        state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .agents
-            .iter()
-            .find(|agent| agent.pane_id == pane_id)
-            .map(|agent| agent.workspace_number)
-    });
-    let Some(workspace_number) = workspace_number else {
-        return StatusCode::NOT_FOUND;
-    };
     let focus_id = pane_id.clone();
-    match tokio::task::spawn_blocking(move || HerdrBackend.focus(&focus_id, workspace_number)).await
-    {
+    match tokio::task::spawn_blocking(move || HerdrBackend.focus(&focus_id)).await {
         Ok(Ok(())) => {
             if let Some(state) = AGENT_STATE.get() {
                 let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
@@ -476,18 +460,12 @@ async fn focus_agent() -> StatusCode {
         {
             agent.status = "idle".to_owned();
         }
-        let workspace_number = state
-            .agents
-            .iter()
-            .find(|agent| agent.pane_id == pane_id)
-            .map_or(1, |agent| agent.workspace_number);
-        Some((pane_id, workspace_number))
+        Some(pane_id)
     });
-    let Some((pane_id, workspace_number)) = agent else {
+    let Some(pane_id) = agent else {
         return StatusCode::NO_CONTENT;
     };
-    match tokio::task::spawn_blocking(move || HerdrBackend.focus(&pane_id, workspace_number)).await
-    {
+    match tokio::task::spawn_blocking(move || HerdrBackend.focus(&pane_id)).await {
         Ok(Ok(())) => {
             emit(DockEvent::Agents);
             StatusCode::NO_CONTENT

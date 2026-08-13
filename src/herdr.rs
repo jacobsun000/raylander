@@ -8,7 +8,6 @@ pub struct AgentStatus {
     pub workspace: String,
     pub pane: String,
     pub pane_id: String,
-    pub workspace_number: u32,
     pub status: String,
 }
 
@@ -37,8 +36,14 @@ struct WorkspaceList {
 #[derive(Deserialize)]
 struct Workspace {
     label: String,
-    number: u32,
     workspace_id: String,
+}
+
+#[derive(Deserialize)]
+struct HyprClient {
+    address: String,
+    class: String,
+    title: String,
 }
 
 pub struct HerdrBackend;
@@ -50,7 +55,7 @@ impl HerdrBackend {
             .result
             .workspaces
             .into_iter()
-            .map(|workspace| (workspace.workspace_id, (workspace.label, workspace.number)))
+            .map(|workspace| (workspace.workspace_id, workspace.label))
             .collect();
         let agents: Response<AgentList> = query(&["agent", "list"])?;
         let mut agents = agents
@@ -60,16 +65,13 @@ impl HerdrBackend {
             .map(|agent| AgentStatus {
                 workspace: workspaces
                     .get(&agent.workspace_id)
-                    .map(|(label, _)| label.clone())
+                    .cloned()
                     .unwrap_or_else(|| agent.workspace_id.clone()),
                 pane: agent
                     .pane_id
                     .rsplit_once(":p")
                     .map_or(agent.pane_id.clone(), |(_, pane)| pane.to_owned()),
                 pane_id: agent.pane_id,
-                workspace_number: workspaces
-                    .get(&agent.workspace_id)
-                    .map_or(1, |(_, number)| *number),
                 status: agent.agent_status,
             })
             .collect::<Vec<_>>();
@@ -77,7 +79,7 @@ impl HerdrBackend {
         Ok(agents)
     }
 
-    pub fn focus(&self, pane_id: &str, workspace_number: u32) -> Result<()> {
+    pub fn focus(&self, pane_id: &str) -> Result<()> {
         let output = Command::new("herdr")
             .args(["agent", "focus", pane_id])
             .output()
@@ -85,10 +87,23 @@ impl HerdrBackend {
         if !output.status.success() {
             bail!("herdr agent focus failed");
         }
+        let clients = Command::new("hyprctl")
+            .args(["-j", "clients"])
+            .output()
+            .context("failed to query Hyprland clients")?;
+        let clients: Vec<HyprClient> = serde_json::from_slice(&clients.stdout)
+            .context("hyprctl returned invalid client JSON")?;
+        let client = clients
+            .iter()
+            .find(|client| {
+                client.title.to_ascii_lowercase().starts_with("herdr")
+                    || client.class.eq_ignore_ascii_case("herdr")
+            })
+            .context("Herdr Hyprland window was not found")?;
         let status = Command::new("hyprctl")
             .args([
                 "dispatch",
-                &format!("hl.dsp.focus({{workspace={workspace_number}}})"),
+                &format!("hl.dsp.focus({{window=\"address:{}\"}})", client.address),
             ])
             .status()
             .context("failed to execute hyprctl")?;
