@@ -77,6 +77,7 @@ fn capture(sender: mpsc::SyncSender<[u8; BANDS]>, active: Arc<AtomicBool>) {
             }
         }
         let _ = child.kill();
+        let _ = child.wait();
         if active.load(Ordering::Relaxed) {
             thread::sleep(Duration::from_secs(1));
         }

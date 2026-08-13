@@ -217,7 +217,9 @@ impl Runtime {
                 (None, None)
             }
         };
-        let (observer, observer_events) = if config.components.volume_osd.observe_external {
+        let (observer, observer_events) = if config.components.volume_osd.observe_external
+            || config.components.external_dock.enabled
+        {
             let (observer, receiver) = AudioObserver::start();
             (Some(observer), Some(receiver))
         } else {
@@ -509,6 +511,7 @@ impl Runtime {
         if !changed {
             return;
         }
+        crate::web_server::notify_volume();
         match self.backend.current() {
             Ok(state) if self.last_state != Some(state) => {
                 self.last_state = Some(state);
@@ -527,8 +530,10 @@ impl Runtime {
         let new_shell = ShellUi::new(&self.app, &new_config);
         new_shell.update(&self.shell_state);
         self.shell = new_shell;
-        if new_config.components.volume_osd.observe_external != self.observer.is_some() {
-            if new_config.components.volume_osd.observe_external {
+        let needs_audio_observer = new_config.components.volume_osd.observe_external
+            || new_config.components.external_dock.enabled;
+        if needs_audio_observer != self.observer.is_some() {
+            if needs_audio_observer {
                 let (observer, receiver) = AudioObserver::start();
                 self.observer = Some(observer);
                 self.observer_events = Some(receiver);

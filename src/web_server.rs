@@ -28,7 +28,7 @@ use serde::Deserialize;
 use tokio::sync::{broadcast, oneshot};
 
 use crate::{
-    audio::{AudioObserver, WpctlBackend},
+    audio::WpctlBackend,
     audio_visualizer,
     bluetooth::{BluetoothAvailability, BluetoothBackend},
     calendar_events::{CalendarEvent, GoogleCalendarBackend},
@@ -49,7 +49,8 @@ const ARCH_LOGO: &[u8] = include_bytes!("../assets/web/arch-logo.png");
 const PI_LOGO: &str = include_str!("../assets/web/pi-logo.svg");
 const TODO_ICON: &str = include_str!("../assets/web/todo.svg");
 static WEATHER_COORDS: OnceLock<(String, String)> = OnceLock::new();
-static EVENTS: OnceLock<broadcast::Sender<DockEvent>> = OnceLock::new();
+static EVENTS: OnceLock<broadcast::Sender<String>> = OnceLock::new();
+static EVENT_INPUT: OnceLock<mpsc::Sender<DockEvent>> = OnceLock::new();
 static DOCK_DISPLAY: OnceLock<u32> = OnceLock::new();
 static AGENT_STATE: OnceLock<Mutex<AgentWidgetState>> = OnceLock::new();
 static CALENDAR_URLS: OnceLock<Vec<String>> = OnceLock::new();
@@ -57,6 +58,7 @@ static CALENDAR_EVENTS: OnceLock<Mutex<Vec<CalendarEvent>>> = OnceLock::new();
 static SPECTRUM: OnceLock<Mutex<[u8; 16]>> = OnceLock::new();
 static ARTWORK_CACHE: OnceLock<Mutex<HashMap<u64, Vec<u8>>>> = OnceLock::new();
 static SPECTRUM_ACTIVE: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+static DASHBOARD_SNAPSHOT: OnceLock<Mutex<String>> = OnceLock::new();
 
 #[derive(Default)]
 struct AgentWidgetState {
@@ -65,7 +67,7 @@ struct AgentWidgetState {
     completed_at: Option<Instant>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum DockEvent {
     Volume,
     Media,
@@ -78,10 +80,18 @@ enum DockEvent {
     Spectrum,
 }
 
-pub(crate) fn notify_display_power() {
-    if let Some(events) = EVENTS.get() {
-        let _ = events.send(DockEvent::DisplayPower);
+fn emit(event: DockEvent) {
+    if let Some(events) = EVENT_INPUT.get() {
+        let _ = events.send(event);
     }
+}
+
+pub(crate) fn notify_volume() {
+    emit(DockEvent::Volume);
+}
+
+pub(crate) fn notify_display_power() {
+    emit(DockEvent::DisplayPower);
 }
 
 #[derive(Template)]
@@ -151,7 +161,35 @@ fn run(address: SocketAddr, shutdown: oneshot::Receiver<()>, ready: mpsc::SyncSe
         };
         let (events, _) = broadcast::channel(32);
         let _ = EVENTS.set(events.clone());
-        start_event_sources(events);
+        let (event_input, event_output) = mpsc::channel();
+        let _ = EVENT_INPUT.set(event_input);
+        thread::Builder::new()
+            .name("raylander-dock-events".into())
+            .spawn(move || {
+                let mut previous = HashMap::<DockEvent, String>::new();
+                while let Ok(event) = event_output.recv() {
+                    let fragment = event_fragment(event);
+                    if !fragment.is_empty() && previous.get(&event) != Some(&fragment) {
+                        previous.insert(event, fragment.clone());
+                        let _ = events.send(fragment);
+                    }
+                }
+            })
+            .expect("failed to start dock event renderer");
+        start_event_sources();
+        thread::Builder::new()
+            .name("raylander-dock-warmup".into())
+            .spawn(|| {
+                let snapshot = dashboard_fragment();
+                *DASHBOARD_SNAPSHOT
+                    .get_or_init(|| Mutex::new(String::new()))
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = snapshot.clone();
+                if let Some(events) = EVENTS.get() {
+                    let _ = events.send(snapshot);
+                }
+            })
+            .expect("failed to start dashboard warmup");
         let _ = ready.send(Ok(()));
         if let Err(error) = axum::serve(listener, router())
             .with_graceful_shutdown(async {
@@ -220,9 +258,7 @@ async fn set_visualizer_active(
             .get_or_init(|| Mutex::new([0; 16]))
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = [0; 16];
-        if let Some(events) = EVENTS.get() {
-            let _ = events.send(DockEvent::Spectrum);
-        }
+        emit(DockEvent::Spectrum);
     }
     StatusCode::NO_CONTENT
 }
@@ -267,9 +303,7 @@ async fn bluetooth_power() -> StatusCode {
     }
     .await;
     if result.is_ok() {
-        if let Some(events) = EVENTS.get() {
-            let _ = events.send(DockEvent::Connectivity);
-        }
+        emit(DockEvent::Connectivity);
         StatusCode::NO_CONTENT
     } else {
         StatusCode::SERVICE_UNAVAILABLE
@@ -286,9 +320,7 @@ async fn bluetooth_scan() -> StatusCode {
     }
     .await;
     if result.is_ok() {
-        if let Some(events) = EVENTS.get() {
-            let _ = events.send(DockEvent::Connectivity);
-        }
+        emit(DockEvent::Connectivity);
         StatusCode::NO_CONTENT
     } else {
         StatusCode::SERVICE_UNAVAILABLE
@@ -313,9 +345,7 @@ async fn bluetooth_device(
         _ => return StatusCode::NOT_FOUND,
     };
     if result.is_ok() {
-        if let Some(events) = EVENTS.get() {
-            let _ = events.send(DockEvent::Connectivity);
-        }
+        emit(DockEvent::Connectivity);
         StatusCode::NO_CONTENT
     } else {
         StatusCode::SERVICE_UNAVAILABLE
@@ -325,9 +355,7 @@ async fn bluetooth_device(
 async fn toggle_input_method() -> StatusCode {
     match tokio::task::spawn_blocking(|| Fcitx5Backend.apply(&InputMethodAction::Toggle)).await {
         Ok(Ok(())) => {
-            if let Some(events) = EVENTS.get() {
-                let _ = events.send(DockEvent::InputMethod);
-            }
+            emit(DockEvent::InputMethod);
             StatusCode::NO_CONTENT
         }
         _ => StatusCode::SERVICE_UNAVAILABLE,
@@ -369,9 +397,7 @@ async fn focus_agent_by_id(
                     state.completed_at = None;
                 }
             }
-            if let Some(events) = EVENTS.get() {
-                let _ = events.send(DockEvent::Agents);
-            }
+            emit(DockEvent::Agents);
             StatusCode::NO_CONTENT
         }
         _ => StatusCode::SERVICE_UNAVAILABLE,
@@ -403,9 +429,7 @@ async fn focus_agent() -> StatusCode {
     };
     match tokio::task::spawn_blocking(move || HerdrBackend.focus(&pane_id)).await {
         Ok(Ok(())) => {
-            if let Some(events) = EVENTS.get() {
-                let _ = events.send(DockEvent::Agents);
-            }
+            emit(DockEvent::Agents);
             StatusCode::NO_CONTENT
         }
         _ => StatusCode::SERVICE_UNAVAILABLE,
@@ -529,34 +553,42 @@ async fn websocket(upgrade: WebSocketUpgrade) -> impl IntoResponse {
 async fn send_time(mut socket: WebSocket) {
     let Some(events) = EVENTS.get() else { return };
     let mut events = events.subscribe();
-    let initial = tokio::task::spawn_blocking(dashboard_fragment)
-        .await
-        .unwrap_or_default();
-    if socket.send(Message::Text(initial.into())).await.is_err() {
+    let snapshot = DASHBOARD_SNAPSHOT
+        .get_or_init(|| Mutex::new(String::new()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    if !snapshot.is_empty() && socket.send(Message::Text(snapshot.into())).await.is_err() {
         return;
     }
-    loop {
-        let Ok(event) = events.recv().await else {
-            break;
-        };
+    // Send inexpensive live fragments without blocking on cold package, DDC, or weather queries.
+    for event in [
+        DockEvent::Volume,
+        DockEvent::Media,
+        DockEvent::InputMethod,
+        DockEvent::Hyprland,
+        DockEvent::DisplayPower,
+        DockEvent::Agents,
+        DockEvent::Calendar,
+    ] {
         let fragment = tokio::task::spawn_blocking(move || event_fragment(event))
             .await
             .unwrap_or_default();
+        if socket.send(Message::Text(fragment.into())).await.is_err() {
+            return;
+        }
+    }
+    loop {
+        let Ok(fragment) = events.recv().await else {
+            break;
+        };
         if socket.send(Message::Text(fragment.into())).await.is_err() {
             break;
         }
     }
 }
 
-fn start_event_sources(events: broadcast::Sender<DockEvent>) {
-    let (observer, audio_events) = AudioObserver::start();
-    let volume_events = events.clone();
-    thread::spawn(move || {
-        let _observer = observer;
-        while audio_events.recv().is_ok() {
-            let _ = volume_events.send(DockEvent::Volume);
-        }
-    });
+fn start_event_sources() {
     observe_command(
         DockEvent::Media,
         [
@@ -582,7 +614,7 @@ fn start_event_sources(events: broadcast::Sender<DockEvent>) {
                 .get_or_init(|| Mutex::new([0; 16]))
                 .lock()
                 .unwrap_or_else(|error| error.into_inner()) = levels;
-            let _ = events.send(DockEvent::Spectrum);
+            emit(DockEvent::Spectrum);
         }
     });
 }
@@ -597,9 +629,7 @@ fn observe_calendar() {
                 if *state != events {
                     *state = events;
                     drop(state);
-                    if let Some(sender) = EVENTS.get() {
-                        let _ = sender.send(DockEvent::Calendar);
-                    }
+                    emit(DockEvent::Calendar);
                 }
             }
             thread::sleep(Duration::from_secs(5 * 60));
@@ -610,7 +640,6 @@ fn observe_calendar() {
 fn observe_command<const N: usize>(event: DockEvent, command: [&'static str; N]) {
     thread::spawn(move || {
         loop {
-            let Some(events) = EVENTS.get() else { return };
             let Ok(mut child) = Command::new(command[0])
                 .args(&command[1..])
                 .stdout(Stdio::piped())
@@ -625,7 +654,7 @@ fn observe_command<const N: usize>(event: DockEvent, command: [&'static str; N])
                     if line.is_err() {
                         break;
                     }
-                    let _ = events.send(event);
+                    emit(event);
                 }
             }
             let _ = child.wait();
@@ -641,9 +670,7 @@ fn observe_input_method() {
             let current = Fcitx5Backend.current().ok();
             if previous.as_ref() != current.as_ref() {
                 previous = current;
-                if let Some(events) = EVENTS.get() {
-                    let _ = events.send(DockEvent::InputMethod);
-                }
+                emit(DockEvent::InputMethod);
             }
             thread::sleep(Duration::from_millis(500));
         }
@@ -687,9 +714,7 @@ fn observe_agents() {
                 }
                 previous = current;
                 drop(state);
-                if let Some(events) = EVENTS.get() {
-                    let _ = events.send(DockEvent::Agents);
-                }
+                emit(DockEvent::Agents);
             }
             if let Some(state) = AGENT_STATE.get() {
                 let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
@@ -700,9 +725,7 @@ fn observe_agents() {
                     state.completed.clear();
                     state.completed_at = None;
                     drop(state);
-                    if let Some(events) = EVENTS.get() {
-                        let _ = events.send(DockEvent::Agents);
-                    }
+                    emit(DockEvent::Agents);
                 }
             }
             thread::sleep(Duration::from_millis(500));
@@ -728,15 +751,13 @@ fn observe_hyprland() {
             };
             for line in BufReader::new(stream).lines() {
                 let Ok(line) = line else { break };
-                if let Some(events) = EVENTS.get() {
-                    if line.starts_with("activewindow") || line.starts_with("workspace") {
-                        let _ = events.send(DockEvent::Hyprland);
-                    } else if line.starts_with("monitoradded")
-                        || line.starts_with("monitorremoved")
-                        || line.starts_with("configreloaded")
-                    {
-                        let _ = events.send(DockEvent::DisplayPower);
-                    }
+                if line.starts_with("workspace") || line.starts_with("focusedmon") {
+                    emit(DockEvent::Hyprland);
+                } else if line.starts_with("monitoradded")
+                    || line.starts_with("monitorremoved")
+                    || line.starts_with("configreloaded")
+                {
+                    emit(DockEvent::DisplayPower);
                 }
             }
         }
@@ -1484,7 +1505,7 @@ mod tests {
         assert!(page.contains("hx-ext=\"ws\""));
         assert!(page.contains("ws-connect=\"/ws\""));
         assert!(page.contains("htmx:wsClose"));
-        assert!(page.contains("setTimeout(retry,1000)"));
+        assert!(page.contains("HTMX will reconnect"));
         assert!(page.contains("toLocaleTimeString"));
     }
 

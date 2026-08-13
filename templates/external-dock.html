@@ -72,7 +72,7 @@
     fetchWeather("minneapolis");
   };
   document.addEventListener("DOMContentLoaded",()=>{for(const id of ["timer-hour","timer-minute","timer-second"]){const el=document.querySelector(`#${id}`),max=id==="timer-hour"?23:59;el.innerHTML=`<i></i>${[...Array(max+1)].map((_,i)=>`<b>${String(i).padStart(2,"0")}</b>`).join("")}<i></i>`}updateClock();setInterval(updateClock,1000);syncDisplayPower();bindGestures();new MutationObserver(syncDisplayPower).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:["data-on"]})});
-  document.addEventListener("htmx:wsClose",()=>{const retry=()=>fetch("/",{cache:"no-store"}).then(r=>r.ok?location.reload():setTimeout(retry,1000)).catch(()=>setTimeout(retry,1000));setTimeout(retry,1000)},{once:true});
+  document.addEventListener("htmx:wsClose",()=>console.warn("Dock WebSocket closed; HTMX will reconnect"));
   </script>
 </head>
 <body class="min-h-screen bg-[#0b0c0f] font-sans text-[#f1f2f5] antialiased [color-scheme:dark]">
