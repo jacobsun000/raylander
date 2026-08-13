@@ -294,6 +294,10 @@ impl Runtime {
             Command::Preview { .. } => {
                 anyhow::bail!("preview must run in the local process")
             }
+            Command::DisplayPower => {
+                crate::web_server::notify_display_power();
+                Ok(())
+            }
             Command::Reload => self.reload(),
             Command::Quit => {
                 app.quit();

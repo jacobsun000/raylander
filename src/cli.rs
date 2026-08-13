@@ -60,6 +60,8 @@ pub enum Command {
         #[arg(long, value_enum)]
         color_scheme: Option<PreviewColorScheme>,
     },
+    /// Notify connected docks that the display power state changed.
+    DisplayPower,
     /// Reload configuration and theme files.
     Reload,
     /// Stop the running background process.
@@ -165,6 +167,12 @@ mod tests {
                 command: VolumeCommand::Up
             }
         ));
+    }
+
+    #[test]
+    fn parses_display_power_notification() {
+        let cli = Cli::try_parse_from(["raylander", "display-power"]).unwrap();
+        assert!(matches!(cli.command, Command::DisplayPower));
     }
 
     #[test]

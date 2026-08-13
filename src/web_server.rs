@@ -48,6 +48,12 @@ enum DockEvent {
     DisplayPower,
 }
 
+pub(crate) fn notify_display_power() {
+    if let Some(events) = EVENTS.get() {
+        let _ = events.send(DockEvent::DisplayPower);
+    }
+}
+
 #[derive(Template)]
 #[template(path = "external-dock.html")]
 struct DockTemplate;
@@ -321,6 +327,7 @@ fn observe_hyprland() {
 struct HyprMonitor {
     id: i32,
     focused: bool,
+    dpms_status: bool,
     active_workspace: HyprWorkspaceRef,
 }
 #[derive(Deserialize)]
@@ -405,8 +412,8 @@ fn input_method_fragment() -> String {
 }
 
 fn display_power_fragment() -> String {
-    let enabled =
-        hyprctl_json::<Vec<HyprMonitor>>("monitors").is_some_and(|monitors| !monitors.is_empty());
+    let enabled = hyprctl_json::<Vec<HyprMonitor>>("monitors")
+        .is_some_and(|monitors| monitors.iter().any(|monitor| monitor.dpms_status));
     format!(r#"<div id="display-power" data-on="{enabled}" hidden hx-swap-oob="outerHTML"></div>"#)
 }
 
