@@ -74,8 +74,9 @@
   .media-controls button { @apply grid size-8 place-items-center rounded-full bg-white/15 text-white transition duration-150; }
   .media-controls button:active { transform:scale(.92); }
   .media-controls svg { @apply size-4 fill-current; }
+  .media-dialog { @apply m-0 h-dvh w-screen bg-[#16181e] p-0; }
   .media-dialog.closing .media-full-panel { opacity:0; transition:opacity .24s ease-in; }
-  .media-full-panel { @apply relative isolate grid h-full grid-cols-[46%_54%] overflow-hidden rounded-[18px] border border-white/10 bg-[#16181e] shadow-2xl; }
+  .media-full-panel { @apply relative isolate grid h-dvh w-screen grid-cols-[46%_54%] overflow-hidden bg-[#16181e]; }
   .media-full-panel.no-lyrics { @apply grid-cols-1; }
   .media-full-left { @apply z-10 flex flex-col items-center justify-center border-r border-white/10 bg-[#111319]/80 p-5 text-center; transform:translateY(8px); }
   .media-full-panel.no-lyrics .media-full-left { @apply mx-auto w-[52%] border-r-0 bg-transparent; }
