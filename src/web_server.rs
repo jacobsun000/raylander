@@ -5,7 +5,11 @@ use std::{
     net::SocketAddr,
     os::unix::net::UnixStream,
     process::{Command, Stdio},
-    sync::{Mutex, OnceLock, mpsc},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -52,6 +56,7 @@ static CALENDAR_URLS: OnceLock<Vec<String>> = OnceLock::new();
 static CALENDAR_EVENTS: OnceLock<Mutex<Vec<CalendarEvent>>> = OnceLock::new();
 static SPECTRUM: OnceLock<Mutex<[u8; 16]>> = OnceLock::new();
 static ARTWORK_CACHE: OnceLock<Mutex<HashMap<u64, Vec<u8>>>> = OnceLock::new();
+static SPECTRUM_ACTIVE: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
 #[derive(Default)]
 struct AgentWidgetState {
@@ -165,6 +170,7 @@ fn router() -> Router {
         .route("/ws", get(websocket))
         .route("/artwork", get(artwork))
         .route("/media/{action}", post(media_action))
+        .route("/media-visualizer/{active}", post(set_visualizer_active))
         .route("/volume/{percent}", post(set_volume))
         .route("/brightness/{percent}", post(set_brightness))
         .route("/screenshot", post(open_screenshot))
@@ -201,6 +207,24 @@ async fn index() -> Response {
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
+}
+
+async fn set_visualizer_active(
+    axum::extract::Path(active): axum::extract::Path<bool>,
+) -> StatusCode {
+    SPECTRUM_ACTIVE
+        .get_or_init(|| Arc::new(AtomicBool::new(false)))
+        .store(active, Ordering::Relaxed);
+    if !active {
+        *SPECTRUM
+            .get_or_init(|| Mutex::new([0; 16]))
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = [0; 16];
+        if let Some(events) = EVENTS.get() {
+            let _ = events.send(DockEvent::Spectrum);
+        }
+    }
+    StatusCode::NO_CONTENT
 }
 
 async fn media_action(axum::extract::Path(action): axum::extract::Path<String>) -> StatusCode {
@@ -548,7 +572,10 @@ fn start_event_sources(events: broadcast::Sender<DockEvent>) {
     observe_hyprland();
     observe_agents();
     observe_calendar();
-    let spectrum = audio_visualizer::observe();
+    let spectrum_active = SPECTRUM_ACTIVE
+        .get_or_init(|| Arc::new(AtomicBool::new(false)))
+        .clone();
+    let spectrum = audio_visualizer::observe(spectrum_active);
     thread::spawn(move || {
         while let Ok(levels) = spectrum.recv() {
             *SPECTRUM

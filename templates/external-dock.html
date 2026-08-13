@@ -5,7 +5,8 @@
   <script src="/assets/htmx.min.js"></script><script src="/assets/htmx-ext-ws.js"></script>
   <script>
   const post = path => fetch(path, {method: "POST"});
-  const closeDialog = dialog => {if(!dialog.open||dialog.classList.contains("closing"))return;dialog.classList.add("closing");setTimeout(()=>{dialog.close();dialog.classList.remove("closing")},240)};
+  const closeDialog = dialog => {if(!dialog.open||dialog.classList.contains("closing"))return;if(dialog.id==='media-dialog')post('/media-visualizer/false');dialog.classList.add("closing");setTimeout(()=>{dialog.close();dialog.classList.remove("closing")},240)};
+  const openMedia=()=>{document.querySelector('#media-dialog').showModal();post('/media-visualizer/true')};
   const openAgents=()=>document.querySelector("#agent-dialog").showModal();
   const focusAgent=id=>{fetch(`/agent/focus/${encodeURIComponent(id)}`,{method:"POST"});closeDialog(document.querySelector("#agent-dialog"))};
   const bluetoothCommand=(action,button)=>{button.disabled=true;fetch(`/bluetooth/${action}`,{method:"POST"}).finally(()=>setTimeout(()=>button.disabled=false,600))};
@@ -13,6 +14,8 @@
   let spectrumFrame;
   const renderSpectrum=()=>{cancelAnimationFrame(spectrumFrame);spectrumFrame=requestAnimationFrame(()=>{const data=document.querySelector('#spectrum-data');const bars=document.querySelectorAll('#media-visualizer>i');if(!data||!bars.length)return;data.dataset.levels.split(',').forEach((level,index)=>{if(bars[index])bars[index].style.height=`${Math.max(3,+level)}%`})})};
   document.addEventListener('htmx:oobAfterSwap',renderSpectrum);
+  addEventListener('DOMContentLoaded',()=>document.querySelector('#media-dialog').addEventListener('close',()=>post('/media-visualizer/false')));
+  addEventListener('pagehide',()=>navigator.sendBeacon('/media-visualizer/false'));
   let volumeTimer, pendingVolume;
   const sendVolume = () => { const value=pendingVolume; volumeTimer=undefined; post(`/volume/${value}`).finally(()=>{if(pendingVolume!==value&&!volumeTimer)volumeTimer=setTimeout(sendVolume,32)}) };
   const setVolume = value => {
@@ -93,7 +96,7 @@
   <section id="packages-card" class="card"><p class="label">Updates</p><p id="packages-total" class="big-number">—</p><div class="chips"><span id="packages-pacman" title="Official packages">◆ —</span><span id="packages-paru" title="AUR packages">▲ —</span></div></section>
   <section id="focus-card" class="card"><div id="monitors" class="monitor-layout"><p class="focus-title">Desktop</p><div class="monitor-grid"><div class="monitor-view" data-base="1" data-active="1"><div class="workspace-dots"><i class="active focused"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div></div></section>
 
-  <section id="media-card" class="card media-card" onclick="document.querySelector('#media-dialog').showModal()" role="button">
+  <section id="media-card" class="card media-card" onclick="openMedia()" role="button">
     <div id="media-ambient" class="media-ambient"></div>
     <img id="media-art" src="/artwork" alt="" onerror="this.hidden=true" onload="this.hidden=false">
     <div id="media-empty" class="media-empty" aria-hidden="true"><img src="/assets/arch-logo.png" alt=""></div><div id="media-copy" class="media-copy hidden"><p id="media-title" class="value truncate">Nothing playing</p><p id="media-artist" class="truncate text-[9px] text-[#a6acb9]"></p><div class="media-controls" onclick="event.stopPropagation()"><button onclick="fetch('/media/previous',{method:'POST'})" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button><button class="media-primary" onclick="fetch('/media/play',{method:'POST'})" aria-label="Play"><svg class="play-icon" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg><svg class="pause-icon" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button><button onclick="fetch('/media/next',{method:'POST'})" aria-label="Next"><svg viewBox="0 0 24 24"><path d="m6 5 9 7-9 7zm10 0h2v14h-2z"/></svg></button></div></div>

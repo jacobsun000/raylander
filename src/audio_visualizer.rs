@@ -1,7 +1,11 @@
 use std::{
     io::Read,
     process::{Command, Stdio},
-    sync::mpsc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -11,17 +15,21 @@ use rustfft::{FftPlanner, num_complex::Complex};
 const FFT_SIZE: usize = 2048;
 const BANDS: usize = 16;
 
-pub fn observe() -> mpsc::Receiver<[u8; BANDS]> {
+pub fn observe(active: Arc<AtomicBool>) -> mpsc::Receiver<[u8; BANDS]> {
     let (sender, receiver) = mpsc::sync_channel(2);
     thread::Builder::new()
         .name("raylander-spectrum".into())
-        .spawn(move || capture(sender))
+        .spawn(move || capture(sender, active))
         .expect("start spectrum observer");
     receiver
 }
 
-fn capture(sender: mpsc::SyncSender<[u8; BANDS]>) {
+fn capture(sender: mpsc::SyncSender<[u8; BANDS]>, active: Arc<AtomicBool>) {
     loop {
+        if !active.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(250));
+            continue;
+        }
         let Some(device) = default_monitor() else {
             thread::sleep(Duration::from_secs(2));
             continue;
@@ -50,7 +58,7 @@ fn capture(sender: mpsc::SyncSender<[u8; BANDS]>) {
         let mut bytes = vec![0_u8; FFT_SIZE * 4];
         let mut smooth = [0_f32; BANDS];
         let mut last_emit = Instant::now();
-        while stdout.read_exact(&mut bytes).is_ok() {
+        while active.load(Ordering::Relaxed) && stdout.read_exact(&mut bytes).is_ok() {
             let mut samples = bytes
                 .chunks_exact(4)
                 .enumerate()
@@ -69,7 +77,9 @@ fn capture(sender: mpsc::SyncSender<[u8; BANDS]>) {
             }
         }
         let _ = child.kill();
-        thread::sleep(Duration::from_secs(1));
+        if active.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_secs(1));
+        }
     }
 }
 
