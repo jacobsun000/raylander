@@ -187,6 +187,10 @@ impl ShellUi {
         for window in &self.bars {
             window.present();
         }
+        self.show_desktop();
+    }
+
+    pub fn show_desktop(&self) {
         for window in &self.desktop_windows {
             window.present();
         }

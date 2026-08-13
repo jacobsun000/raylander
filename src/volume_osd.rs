@@ -111,31 +111,6 @@ impl VolumeOsd {
         self.window.set_monitor(selected.as_ref());
     }
 
-    pub fn show(&self, state: VolumeState) {
-        self.show_for(state, Duration::from_millis(self.config.timeout_ms), false);
-    }
-
-    pub fn show_microphone(&self, state: VolumeState) {
-        if !self.config.enabled {
-            return;
-        }
-        self.icon.set_icon_name(Some(if state.muted {
-            "microphone-disabled-symbolic"
-        } else {
-            "audio-input-microphone-symbolic"
-        }));
-        if state.muted {
-            self.label.set_label("Muted");
-            self.progress.set_fraction(0.0);
-        } else {
-            self.label.set_label(&format!("{}%", state.percent));
-            self.progress.set_fraction(
-                f64::from(state.percent) / f64::from(self.config.limit_percent.max(1)),
-            );
-        }
-        self.reveal_for(Duration::from_millis(self.config.timeout_ms));
-    }
-
     pub fn demo(&self, duration: Duration) {
         self.show_for(
             VolumeState {

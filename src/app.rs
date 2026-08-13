@@ -197,7 +197,6 @@ impl Runtime {
         }
         shell_state.notification_count = notifications.history().count();
         shell.update(&shell_state);
-        shell.show();
         let (shell_observer, shell_events) = ShellObserver::start();
         let (notification_service, notification_events) = if config.components.notifications.enabled
         {
@@ -311,16 +310,13 @@ impl Runtime {
         self.last_state = Some(state);
         self.shell_state.audio = audio_label(state);
         self.shell.update(&self.shell_state);
-        self.osd.show(state);
         Ok(())
     }
 
     fn handle_microphone(&mut self, command: MicCommand) -> Result<()> {
         let config = &self.config.components.volume_osd;
-        let state =
-            self.backend
-                .apply_microphone(command, config.step_percent, config.limit_percent)?;
-        self.osd.show_microphone(state);
+        self.backend
+            .apply_microphone(command, config.step_percent, config.limit_percent)?;
         Ok(())
     }
 
@@ -514,7 +510,6 @@ impl Runtime {
                 self.last_state = Some(state);
                 self.shell_state.audio = audio_label(state);
                 self.shell.update(&self.shell_state);
-                self.osd.show(state);
             }
             Ok(_) => {}
             Err(error) => tracing::warn!(%error, "failed to refresh observed volume"),
@@ -527,7 +522,6 @@ impl Runtime {
         self.osd.apply_config(&new_config.components.volume_osd);
         let new_shell = ShellUi::new(&self.app, &new_config);
         new_shell.update(&self.shell_state);
-        new_shell.show();
         self.shell = new_shell;
         if new_config.components.volume_osd.observe_external != self.observer.is_some() {
             if new_config.components.volume_osd.observe_external {
