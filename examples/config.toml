@@ -79,3 +79,5 @@ history-limit = 100
 enabled = true
 bind-address = "0.0.0.0"
 port = 8030
+weather-latitude = "30.2672"
+weather-longitude = "-97.7431"

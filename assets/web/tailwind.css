@@ -2,50 +2,67 @@
 @source "../../templates/external-dock.html";
 
 @layer components {
-  .label { @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-[#666d7b]; }
-  .value { @apply mt-1 text-lg font-semibold text-[#f1f2f5]; }
-  .metric { @apply text-xs text-[#a6acb9]; }
-  .metric-value { @apply font-mono text-xs tabular-nums text-[#f1f2f5]; }
-  .track { @apply mt-2 h-1.5 overflow-hidden rounded-full bg-white/[.06]; }
+  .card { @apply relative overflow-hidden rounded-[14px] border border-white/10 bg-[#16181e] p-3 shadow-sm; }
+  .label { @apply text-[9px] font-semibold uppercase tracking-[.14em] text-[#666d7b]; }
+  .value { @apply mt-1 text-sm font-semibold leading-tight; }
+  .status-dot { @apply absolute right-3 top-3 size-2 rounded-full bg-[#0a7cff] shadow-[0_0_14px_#0a7cff]; }
+  .compact-card { @apply flex items-center justify-center gap-2; }
+  .round-icon { @apply grid size-9 shrink-0 place-items-center rounded-xl; }
+  .control-grid { @apply grid grid-cols-2 place-items-center gap-2; }
+  .control-icon { @apply grid size-9 place-items-center rounded-full bg-white/10 text-[#666d7b] transition-colors; }
+  .control-icon svg { @apply size-4 fill-current; }
+  .control-icon.active { @apply bg-[#0a7cff] text-white; }
+  .control-icon.connected { @apply bg-[#22a857] text-white; }
+  .control-icon.warning { @apply bg-[#e8a13a] text-[#0b0c0f]; }
+  .controls-card { @apply flex items-center justify-center gap-2; }
+  .ios-gauge { @apply relative h-full max-h-20 min-h-16 flex-1 overflow-hidden rounded-[13px] bg-white/10; }
+  .ios-fill { @apply absolute inset-x-0 bottom-0 transition-[height] duration-500; height: 0%; }
+  .gauge-content { @apply absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 font-mono text-[9px] font-semibold text-white mix-blend-difference; }
+  .gauge-content svg { @apply size-5 fill-current; }
+  .gauge-percent { @apply absolute top-[calc(50%+12px)] opacity-0; }
+  .gauge-percent.flash { animation: gauge-value 1.8s ease-out; }
+  .weather-card { @apply flex items-center justify-center gap-3; }
+  .big-number { @apply mt-1 font-mono text-3xl font-semibold leading-none tabular-nums; }
+  .chips { @apply mt-2 flex gap-1 font-mono text-[8px] text-[#a6acb9]; }
+  .chips span { @apply rounded bg-white/[.06] px-1 py-0.5; }
+  .accent-meta { @apply mt-2 truncate font-mono text-[9px] text-[#0a7cff]; }
+  .media-card { @apply relative p-0; }
+  .media-card img { @apply absolute inset-0 size-full object-cover; }
+  .media-shade { @apply absolute inset-0 bg-gradient-to-t from-black/95 via-black/25 to-transparent; }
+  .media-copy { @apply absolute inset-x-0 bottom-0 z-10 p-2; }
+  .media-controls { @apply mt-1 flex items-center justify-center gap-3; }
+  .media-controls button { @apply grid size-5 place-items-center rounded-full bg-white/15 text-white; }
+  .media-controls svg { @apply size-2.5 fill-current; }
+  .system-grid { @apply grid h-full grid-cols-2 content-center gap-x-5 gap-y-5; }
+  .metric-row { @apply flex items-center justify-between text-xs text-[#a6acb9]; }
+  .metric-row svg { @apply size-4 fill-current; }
+  .metric-value { @apply font-mono text-[9px] tabular-nums text-[#f1f2f5]; }
+  .track { @apply mt-1 h-1 overflow-hidden rounded-full bg-white/[.06]; }
   .track i { @apply block h-full rounded-full bg-[#0a7cff] transition-[width] duration-500; width: 0%; }
 }
 
-/* A landscape phone is the dock's primary display: use every pixel without
-   scrolling and preserve readable, glanceable card proportions. */
 @media (orientation: landscape) and (max-height: 600px) {
   html, body { width: 100%; height: 100%; overflow: hidden; }
   #dashboard {
-    width: 100%; height: 100dvh; max-width: none; min-height: 0;
-    padding: 8px; gap: 8px; align-content: stretch;
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-    grid-template-rows: repeat(3, minmax(0, 1fr));
+    width: 100%; height: 100dvh; min-height: 0; max-width: none; margin: 0; padding: 8px; gap: 8px;
+    grid-template-columns: repeat(6, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr));
     grid-template-areas:
-      "clock clock clock volume volume bluetooth bluetooth packages packages focus focus focus"
-      "clock clock clock media media media media media brightness brightness brightness brightness"
-      "system system system system system system system system brightness brightness brightness brightness";
+      "clock clock controls bluetooth packages placeholder1"
+      "media media system system focus focus"
+      "media media system system placeholder2 placeholder2";
   }
-  #dashboard > section { min-width: 0; min-height: 0; overflow: hidden; padding: 12px; border-radius: 14px; }
-  #clock-card { grid-area: clock; }
-  #volume-card { grid-area: volume; }
-  #bluetooth-card { grid-area: bluetooth; }
-  #media-card { grid-area: media; }
-  #packages-card { grid-area: packages; }
-  #focus-card { grid-area: focus; }
-  #brightness-card { grid-area: brightness; }
-  #system-card { grid-area: system; }
-  #clock-card time { margin-top: clamp(12px, 5vh, 28px); font-size: clamp(3rem, 7.4vw, 4.25rem); letter-spacing: -.06em; }
-  #clock-card > p:last-child { margin-top: 10px; }
-  #dashboard .widget-icon { width: 36px; height: 36px; border-radius: 10px; }
-  #dashboard .value { font-size: 15px; line-height: 1.2; }
-  #volume-card, #bluetooth-card { justify-content: center; gap: 8px; padding-inline: 8px; }
-  #volume-card .widget-icon, #bluetooth-card .widget-icon { width: 32px; height: 32px; }
-  #volume-card .label, #bluetooth-card .label { display: none; }
-  #volume-card .value, #bluetooth-card .value { margin-top: 0; white-space: nowrap; }
-  #packages-card > p:nth-child(2) { margin-top: 4px; font-size: 28px; line-height: 1; }
-  #packages-card > div { margin-top: 6px; gap: 4px; }
-  #packages-card > div span { padding: 2px 5px; font-size: 9px; }
-  #focus-card .value { margin-top: 6px; }
-  #brightness-card > div:first-child, #system-card > p:first-child { margin-bottom: 8px; }
-  #brightness { gap: 8px; }
-  #system-card > div { height: calc(100% - 20px); align-items: center; }
+  #dashboard > section { min-width: 0; min-height: 0; padding: 10px; border-radius: 14px; }
+  #clock-card{grid-area:clock} #controls-card{grid-area:controls} #bluetooth-card{grid-area:bluetooth}
+  #packages-card{grid-area:packages} #focus-card{grid-area:focus} #media-card{grid-area:media}
+  #system-card{grid-area:system} #weather-card{grid-area:placeholder1} #placeholder-card-2{grid-area:placeholder2}
+  #clock-card { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  #clock-card .status-dot { right: 12px; top: 12px; }
+  #clock-card time { margin-top: 8px; font-size: clamp(2.25rem, 6vw, 3rem); }
+  #media-card { padding: 0; }
+  #system-card { padding: 16px; }
+}
+
+@keyframes gauge-value {
+  0%, 70% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(2px); }
 }

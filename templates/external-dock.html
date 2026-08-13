@@ -1,61 +1,41 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Raylander External Dock</title>
-  <link rel="stylesheet" href="/assets/external-dock.css">
-  <script src="/assets/htmx.min.js"></script>
-  <script src="/assets/htmx-ext-ws.js"></script>
-  <script>
-    document.addEventListener("htmx:wsClose", () => {
-      const reloadWhenReady = () => fetch("/", { cache: "no-store" })
-        .then(response => response.ok ? location.reload() : setTimeout(reloadWhenReady, 1000))
-        .catch(() => setTimeout(reloadWhenReady, 1000));
-      setTimeout(reloadWhenReady, 1000);
-    }, { once: true });
-  </script>
+<html lang="en"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Raylander External Dock</title><link rel="stylesheet" href="/assets/external-dock.css">
+  <script src="/assets/htmx.min.js"></script><script src="/assets/htmx-ext-ws.js"></script>
+  <script>document.addEventListener("htmx:wsClose",()=>{const retry=()=>fetch("/",{cache:"no-store"}).then(r=>r.ok?location.reload():setTimeout(retry,1000)).catch(()=>setTimeout(retry,1000));setTimeout(retry,1000)},{once:true});</script>
 </head>
 <body class="min-h-screen bg-[#0b0c0f] font-sans text-[#f1f2f5] antialiased [color-scheme:dark]">
-  <main id="dashboard" class="mx-auto grid min-h-dvh w-full max-w-6xl grid-cols-1 content-center gap-3 p-4 sm:grid-cols-2 sm:p-8 lg:grid-cols-4" hx-ext="ws" ws-connect="/ws">
-    <section id="clock-card" class="relative overflow-hidden rounded-[18px] border border-white/10 bg-[#16181e] p-6 shadow-2xl sm:col-span-2 lg:row-span-2">
-      <div class="absolute right-5 top-5 size-2 rounded-full bg-[#0a7cff] shadow-[0_0_16px_#0a7cff]"></div>
-      <p id="date" class="font-mono text-xs uppercase tracking-[0.16em] text-[#a6acb9]">{{ initial_date }}</p>
-      <time id="server-time" class="mt-8 block font-mono text-[clamp(4rem,12vw,8rem)] font-medium leading-none tracking-[-0.07em] tabular-nums">{{ initial_time }}</time>
-      <p class="mt-5 text-sm text-[#666d7b]">Local time</p>
-    </section>
+<main id="dashboard" class="mx-auto grid min-h-dvh w-full max-w-6xl grid-cols-1 gap-3 p-4 sm:grid-cols-2" hx-ext="ws" ws-connect="/ws">
+  <section id="clock-card" class="card relative">
+    <span class="status-dot"></span><p id="date" class="label">{{ initial_date }}</p>
+    <time id="server-time" class="mt-3 block font-mono text-5xl font-medium leading-none tracking-[-.06em] tabular-nums">{{ initial_time }}</time>
+  </section>
 
-    <section id="volume-card" class="card flex items-center gap-4 rounded-[18px] border border-white/10 bg-[#16181e] p-5">
-      <span class="widget-icon grid size-11 shrink-0 place-items-center rounded-xl bg-white/[.06] text-xl">◕</span>
-      <div><p class="label">Volume</p><p id="volume" class="value">—</p></div>
-    </section>
-    <section id="bluetooth-card" class="card flex items-center gap-4 rounded-[18px] border border-white/10 bg-[#16181e] p-5">
-      <span class="widget-icon grid size-11 shrink-0 place-items-center rounded-xl bg-[#0a7cff]/15 text-[#0a7cff]">ᛒ</span>
-      <div class="min-w-0"><p class="label">Bluetooth</p><p id="bluetooth" class="value truncate">—</p></div>
-    </section>
+  <section id="controls-card" class="card controls-card">
+    <div class="ios-gauge"><div id="volume-fill" class="ios-fill bg-[#f1f2f5]"></div><div class="gauge-content"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9H3Zm13.5 3a4.5 4.5 0 0 0-2.5-4.03v8.05A4.5 4.5 0 0 0 16.5 12Z"/></svg><span id="volume" class="gauge-percent"></span></div></div>
+    <div class="ios-gauge"><div id="brightness-fill" class="ios-fill bg-[#f1f2f5]"></div><div class="gauge-content"><svg viewBox="0 0 24 24"><path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5h1v3h-2V2h1Zm0 17h1v3h-2v-3h1ZM2 11h3v2H2v-2Zm17 0h3v2h-3v-2ZM4.22 5.64l1.42-1.42 2.12 2.12-1.42 1.42-2.12-2.12Zm12.02 12.02 1.42-1.42 2.12 2.12-1.42 1.42-2.12-2.12ZM4.22 18.36l2.12-2.12 1.42 1.42-2.12 2.12-1.42-1.42ZM16.24 6.34l2.12-2.12 1.42 1.42-2.12 2.12-1.42-1.42Z"/></svg><span id="brightness" class="gauge-percent"></span></div></div>
+  </section>
+  <section id="bluetooth-card" class="card control-grid">
+    <span id="bluetooth-control" class="control-icon" title="Bluetooth">ᛒ</span>
+    <span id="network-control" class="control-icon" title="Network"><svg viewBox="0 0 24 24"><path d="M2 8.8a16 16 0 0 1 20 0l-2 2.4a12.8 12.8 0 0 0-16 0L2 8.8Zm4 4.8a9.6 9.6 0 0 1 12 0L16 16a6.4 6.4 0 0 0-8 0l-2-2.4ZM9.8 18.4a3.2 3.2 0 0 1 4.4 0L12 21l-2.2-2.6Z"/></svg></span>
+    <span id="input-control" class="control-icon font-mono text-[10px]" title="Input method">A</span>
+    <span class="control-icon text-lg" title="Reserved">＋</span>
+  </section>
+  <section id="packages-card" class="card"><p class="label">Updates</p><p id="packages-total" class="big-number">—</p><div class="chips"><span id="packages-pacman" title="Official packages">◆ —</span><span id="packages-paru" title="AUR packages">▲ —</span></div></section>
+  <section id="focus-card" class="card"><p class="label">Focus</p><p id="window" class="value truncate">Desktop</p><p id="workspace" class="accent-meta">Workspace —</p></section>
 
-    <section id="media-card" class="rounded-[18px] border border-white/10 bg-[#16181e] p-5 sm:col-span-2">
-      <div class="flex items-center gap-4"><span class="widget-icon grid size-12 shrink-0 place-items-center rounded-xl bg-[#0a7cff] text-xl text-white">♪</span><div class="min-w-0"><p class="label">Now playing</p><p id="media-title" class="value truncate">Nothing playing</p><p id="media-artist" class="mt-1 truncate text-xs text-[#666d7b]"></p></div></div>
-    </section>
+  <section id="media-card" class="card media-card">
+    <img id="media-art" src="/artwork" alt="" onerror="this.hidden=true" onload="this.hidden=false">
+    <div class="media-shade"></div><div class="media-copy"><p id="media-title" class="value truncate">Nothing playing</p><p id="media-artist" class="truncate text-[9px] text-[#a6acb9]"></p><div class="media-controls"><button onclick="fetch('/media/previous',{method:'POST'})" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button><button onclick="fetch('/media/play-pause',{method:'POST'})" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg></button><button onclick="fetch('/media/next',{method:'POST'})" aria-label="Next"><svg viewBox="0 0 24 24"><path d="m6 5 9 7-9 7zm10 0h2v14h-2z"/></svg></button></div></div>
+  </section>
 
-    <section id="packages-card" class="rounded-[18px] border border-white/10 bg-[#16181e] p-5">
-      <p class="label">Package updates</p><p id="packages-total" class="mt-3 font-mono text-4xl font-semibold tabular-nums">—</p><div class="mt-3 flex gap-2 font-mono text-xs text-[#a6acb9]"><span id="packages-pacman" class="rounded-md bg-white/[.06] px-2 py-1">pacman —</span><span id="packages-paru" class="rounded-md bg-white/[.06] px-2 py-1">paru —</span></div>
-    </section>
-    <section id="focus-card" class="rounded-[18px] border border-white/10 bg-[#16181e] p-5">
-      <p class="label">Focus</p><p id="window" class="value mt-3 truncate">Desktop</p><p id="workspace" class="mt-2 font-mono text-xs text-[#0a7cff]">Workspace —</p>
-    </section>
-
-    <section id="brightness-card" class="rounded-[18px] border border-white/10 bg-[#16181e] p-5 sm:col-span-2">
-      <div class="mb-4 flex items-center justify-between"><p class="label">Display brightness</p><span class="text-[#e8a13a]">☀</span></div><div id="brightness" class="grid gap-3"><p class="text-sm text-[#666d7b]">Detecting displays…</p></div>
-    </section>
-    <section id="system-card" class="rounded-[18px] border border-white/10 bg-[#16181e] p-5 sm:col-span-2">
-      <p class="label mb-4">System status</p><div class="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
-        <div><div class="flex justify-between"><span class="metric">CPU</span><span id="cpu" class="metric-value">—</span></div><div class="track"><i id="cpu-bar"></i></div></div>
-        <div><div class="flex justify-between"><span class="metric">Memory</span><span id="memory" class="metric-value">—</span></div><div class="track"><i id="memory-bar"></i></div></div>
-        <div><div class="flex justify-between"><span class="metric">Disk</span><span id="disk" class="metric-value">—</span></div><div class="track"><i id="disk-bar"></i></div></div>
-        <div><div class="flex justify-between"><span class="metric">GPU</span><span id="gpu" class="metric-value">—</span></div><div class="track"><i id="gpu-bar"></i></div></div>
-      </div>
-    </section>
-  </main>
-</body>
-</html>
+  <section id="system-card" class="card"><div class="system-grid">
+    <div><div class="metric-row"><svg viewBox="0 0 24 24" aria-label="CPU"><path d="M7 2h2v3h2V2h2v3h2V2h2v3h2v2h3v2h-3v2h3v2h-3v2h3v2h-3v2h-2v3h-2v-3h-2v3h-2v-3H9v3H7v-3H5v-2H2v-2h3v-2H2v-2h3V9H2V7h3V5h2V2Zm0 5v10h10V7H7Z"/></svg><span id="cpu" class="metric-value">—</span></div><div class="track"><i id="cpu-bar"></i></div></div>
+    <div><div class="metric-row"><svg viewBox="0 0 24 24" aria-label="Memory"><path d="M4 5h16v14H4V5Zm3 3v8h2V8H7Zm4 0v8h2V8h-2Zm4 0v8h2V8h-2ZM2 8h2v2H2V8Zm0 6h2v2H2v-2Zm18-6h2v2h-2V8Zm0 6h2v2h-2v-2Z"/></svg><span id="memory" class="metric-value">—</span></div><div class="track"><i id="memory-bar"></i></div></div>
+    <div><div class="metric-row"><svg viewBox="0 0 24 24" aria-label="Disk"><path d="M4 3h16v18H4V3Zm2 2v14h12V5H6Zm6 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/></svg><span id="disk" class="metric-value">—</span></div><div class="track"><i id="disk-bar"></i></div></div>
+    <div><div class="metric-row"><svg viewBox="0 0 24 24" aria-label="GPU"><path d="M3 5h18v13H3V5Zm2 2v9h14V7H5Zm3 2h8v5H8V9Zm-3 10h3v2H5v-2Zm5 0h4v2h-4v-2Zm6 0h3v2h-3v-2Z"/></svg><span id="gpu" class="metric-value">—</span></div><div class="track"><i id="gpu-bar"></i></div></div>
+  </div></section>
+  <section id="weather-card" class="card weather-card"><span id="weather-icon" class="text-3xl">·</span><div><p id="weather-temp" class="font-mono text-xl font-semibold">—</p><p class="font-mono text-[9px] text-[#a6acb9]"><span id="weather-low">—</span><span class="mx-1 text-[#666d7b]">·</span><span id="weather-high">—</span></p><p id="weather-label" class="text-[9px] text-[#666d7b]">Weather</p></div></section>
+  <section id="placeholder-card-2" class="card grid place-items-center"><span class="text-2xl text-[#666d7b]">＋</span></section>
+</main></body></html>

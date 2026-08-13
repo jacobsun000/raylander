@@ -70,6 +70,8 @@ pub struct ExternalDockConfig {
     pub enabled: bool,
     pub bind_address: IpAddr,
     pub port: u16,
+    pub weather_latitude: String,
+    pub weather_longitude: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -286,6 +288,8 @@ impl Default for ExternalDockConfig {
             enabled: true,
             bind_address: "0.0.0.0".parse().expect("valid default address"),
             port: 8_030,
+            weather_latitude: "30.2672".into(),
+            weather_longitude: "-97.7431".into(),
         }
     }
 }
