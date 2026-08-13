@@ -141,6 +141,7 @@ fn router() -> Router {
         .route("/media/{action}", post(media_action))
         .route("/volume/{percent}", post(set_volume))
         .route("/workspace/{id}", post(focus_workspace))
+        .route("/weather-details", get(weather_details))
         .route(
             "/assets/external-dock.css",
             get(|| async { stylesheet(EXTERNAL_DOCK_CSS) }),
@@ -205,6 +206,46 @@ async fn focus_workspace(axum::extract::Path(id): axum::extract::Path<i32>) -> S
     match result {
         Ok(Ok(status)) if status.success() => StatusCode::NO_CONTENT,
         _ => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+#[derive(Deserialize)]
+struct WeatherDetailsQuery {
+    city: Option<String>,
+}
+
+async fn weather_details(
+    axum::extract::Query(query): axum::extract::Query<WeatherDetailsQuery>,
+) -> Response {
+    let configured = WEATHER_COORDS.get();
+    let (latitude, longitude) = match query.city.as_deref().unwrap_or("minneapolis") {
+        "minneapolis" => ("44.9778", "-93.2650"),
+        "los-angeles" => ("34.0522", "-118.2437"),
+        "detroit" => ("42.3314", "-83.0458"),
+        "new-york" => ("40.7128", "-74.0060"),
+        "guangzhou" => ("23.1291", "113.2644"),
+        "configured" => match configured {
+            Some((latitude, longitude)) => (latitude.as_str(), longitude.as_str()),
+            None => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        },
+        _ => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let url = format!(
+        "https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_min,temperature_2m_max,precipitation_probability_max,sunrise,sunset&forecast_days=7&timezone=auto"
+    );
+    match tokio::task::spawn_blocking(move || {
+        Command::new("curl")
+            .args(["--fail", "--silent", "--max-time", "8", &url])
+            .output()
+    })
+    .await
+    {
+        Ok(Ok(output)) if output.status.success() => (
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            output.stdout,
+        )
+            .into_response(),
+        _ => StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }
 }
 

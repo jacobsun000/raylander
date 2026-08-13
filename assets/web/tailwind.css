@@ -50,13 +50,97 @@
   .workspace-dots i.active.focused { @apply border-[#f59e0b] bg-[#f59e0b]; }
   .monitor-view { touch-action: pan-y; }
   .volume-dialog { @apply m-auto border-0 bg-transparent p-0 text-white outline-none backdrop:bg-black/70; -webkit-tap-highlight-color: transparent; user-select: none; }
+  .volume-dialog[open] { animation: overlay-fade-in .22s ease-out both; }
+  .volume-dialog[open]::backdrop { animation: backdrop-fade-in .22s ease-out both; }
+  .volume-dialog.closing { animation: overlay-fade-out .24s ease-in both; }
+  .volume-dialog.closing::backdrop { animation: backdrop-fade-out .24s ease-in both; }
+  .volume-dialog.closing .volume-dialog-panel { animation: volume-exit .24s ease-in both; }
   .volume-dialog:focus, .volume-dialog *:focus { outline: none; }
   .volume-dialog-panel { @apply flex h-[340px] w-[210px] flex-col items-center gap-4 rounded-[30px] border border-white/15 bg-[#16181e] p-5 shadow-2xl; }
+  .volume-dialog[open] .volume-dialog-panel { animation: volume-enter .3s cubic-bezier(.2,.8,.2,1) both; }
   .volume-dialog-panel > p { @apply text-sm font-semibold; }
   .volume-dialog-gauge { @apply max-h-none min-h-0 w-28 flex-none cursor-default touch-none; height: 260px; -webkit-tap-highlight-color: transparent; user-select: none; }
   .volume-dialog-gauge .gauge-content { @apply gap-3 text-xl; }
   .volume-dialog-gauge .gauge-content svg { @apply size-10; }
   .volume-dialog-gauge #volume-dialog-value { @apply static font-mono text-xl opacity-100; }
+  .dashboard-dialog { @apply m-auto h-full w-full max-h-none max-w-none border-0 bg-[#0b0c0f] p-3 text-white outline-none backdrop:bg-black; }
+  .dashboard-dialog[open] { animation: overlay-fade-in .24s ease-out both; }
+  .dashboard-dialog[open]::backdrop { animation: backdrop-fade-in .24s ease-out both; }
+  .dashboard-dialog.closing { animation: overlay-fade-out .24s ease-in both; }
+  .dashboard-dialog.closing::backdrop { animation: backdrop-fade-out .24s ease-in both; }
+  #clock-dialog.closing .clock-panel { animation: clock-exit .24s ease-in both; }
+  #weather-dialog.closing .weather-shell { animation: weather-exit .24s ease-in both; }
+  .dashboard-dialog:focus, .dashboard-dialog *:focus { outline: none; }
+  .dashboard-panel { @apply grid h-full grid-cols-3 gap-3; }
+  #clock-dialog[open] .clock-panel { animation: clock-enter .34s cubic-bezier(.2,.8,.2,1) both; }
+  #weather-dialog[open] .weather-shell { animation: weather-enter .36s cubic-bezier(.2,.8,.2,1) both; }
+  .dashboard-panel > section { @apply min-h-0 rounded-[22px] border border-white/10 bg-[#16181e] p-4; }
+  .dashboard-panel h2 { @apply mb-3 text-center text-sm font-semibold; }
+  .clock-panel #calendar { @apply flex touch-none items-center; }
+  #calendar-body { @apply w-full; }
+  #calendar-body.month-change { animation: month-change .36s cubic-bezier(.2,.8,.25,1); }
+  #calendar-body.month-up { --month-y: 18px; }
+  #calendar-body.month-down { --month-y: -18px; }
+  .weekdays, #calendar-days { @apply grid grid-cols-7 text-center; }
+  .weekdays { @apply mb-2 text-[9px] text-[#666d7b]; }
+  #calendar-days { @apply gap-y-2 text-xs; }
+  #calendar-days i, #calendar-days b { @apply grid h-6 place-items-center not-italic; }
+  #calendar-days .today { @apply mx-auto size-6 rounded-full bg-[#f59e0b] text-black; }
+  .world-clocks { @apply flex flex-col justify-center gap-8; }
+  .world-clocks div { @apply text-center; }
+  .home-clock time { @apply block font-mono text-5xl font-semibold tabular-nums; animation: digit-pulse 1s ease infinite; }
+  .home-clock span { @apply mt-1 block text-sm text-[#a6acb9]; }
+  .away-clocks { @apply grid grid-cols-3 gap-2; }
+  .away-clocks time { @apply block font-mono text-xl font-semibold tabular-nums; }
+  .away-clocks span, .away-clocks small { @apply block text-[9px] text-[#a6acb9]; }
+  .away-clocks small { @apply text-[#666d7b]; }
+  .timer { @apply flex flex-col items-center justify-center overflow-hidden; }
+  .timer-picker { @apply flex flex-col items-center justify-center; }
+  .timer-wheels { @apply relative flex w-full justify-center gap-2; }
+  .timer-wheels::before { content:""; @apply pointer-events-none absolute inset-x-0 top-0 z-10 h-11; background:linear-gradient(#16181e,transparent); }
+  .timer-wheels::after { content:""; @apply pointer-events-none absolute top-11 z-10 h-11 w-[208px] rounded-xl border-y border-white/15 bg-white/[.06] shadow-[0_44px_24px_10px_#16181e]; }
+  .timer-wheel { @apply h-[132px] w-16 snap-y snap-proximity overflow-y-scroll rounded-xl text-center font-mono text-2xl; scrollbar-width:none; overscroll-behavior-y:auto; -webkit-overflow-scrolling:touch; touch-action:pan-y; }
+  .timer-wheel::-webkit-scrollbar { display:none; }
+  .timer-wheel i, .timer-wheel b { @apply block h-11 snap-center leading-[44px] font-medium; }
+  .timer-labels { @apply grid w-[208px] grid-cols-3 text-center font-mono text-[9px] text-[#666d7b]; }
+  .timer output { @apply mt-3 hidden font-mono text-4xl font-semibold tabular-nums; }
+  .timer button { @apply mt-2 rounded-full bg-[#0a7cff] px-7 py-2 text-xs font-semibold; }
+  .timer.running .timer-picker { @apply hidden; }
+  .timer.running output { @apply my-auto block; animation: timer-in .35s ease-out; }
+  .timer.running #timer-start { @apply bg-[#d94848]; }
+  .alarm-screen { @apply pointer-events-none fixed inset-0 z-50 flex scale-110 flex-col items-center justify-center bg-[#b42335] opacity-0 transition-all duration-300; }
+  .alarm-screen strong { @apply text-6xl font-semibold; }
+  .alarm-screen span { @apply mt-2 text-xl opacity-80; }
+  .alarm-screen button { @apply pointer-events-auto mt-10 rounded-full bg-white px-12 py-3 font-semibold text-[#b42335]; }
+  #clock-dialog.alarming .alarm-screen { @apply scale-100 opacity-100; animation: alarm-pulse 1s ease-in-out infinite; }
+  #weather-dialog { touch-action:none; user-select:none; }
+  .weather-shell { @apply grid h-full grid-cols-[132px_1fr] gap-3 rounded-[18px] bg-[#202228] p-3; }
+  #city-list { @apply flex min-h-0 flex-col gap-2 overflow-y-auto; }
+  .city-item { @apply flex min-h-14 flex-col justify-center rounded-xl border border-transparent bg-white/[.04] px-3 text-left transition-colors duration-150; -webkit-tap-highlight-color:transparent; }
+  .city-item b { @apply text-sm; } .city-item span { @apply text-[10px] text-[#a6acb9]; }
+  .city-item.active { @apply border-[#f2c400] bg-white/10; }
+  .weather-main { @apply grid min-h-0 grid-rows-[76px_38px_1fr_92px] overflow-hidden transition-transform duration-200 ease-out; }
+  .weather-main.city-changing { animation: city-change .32s cubic-bezier(.2,.8,.2,1); }
+  .weather-main header { @apply flex items-start justify-between; }
+  #weather-summary { @apply flex items-center gap-3; }
+  .weather-big-icon { @apply text-5xl; } #weather-summary strong { @apply font-mono text-6xl font-light; }
+  #weather-summary small { @apply text-xs leading-5 text-[#a6acb9]; }
+  #weather-place { @apply text-right; } #weather-place b { @apply block text-2xl font-medium; } #weather-place span { @apply text-sm text-[#a6acb9]; }
+  .weather-main nav { @apply flex gap-0 border-b border-white/10; }
+  .weather-tab { @apply border-r border-white/10 px-5 text-sm text-[#a6acb9]; }
+  .weather-tab.active { @apply border-b-4 border-b-[#f2c400] text-white; }
+  #weather-chart { @apply min-h-0 overflow-hidden py-2; }
+  #chart-bars { @apply flex h-full items-end gap-1; }
+  #chart-bars div { @apply relative h-full flex-1; }
+  #chart-bars i { @apply absolute inset-x-0 bottom-5 block bg-[#f2c400]/25; border-top:3px solid #f2c400; }
+  #chart-bars b { @apply absolute inset-x-0 text-center font-mono text-[10px] text-[#c8ccd4]; }
+  #chart-bars span { @apply absolute inset-x-0 bottom-0 text-center text-[9px] text-[#a6acb9]; }
+  #weather-chart[data-mode="rain"] #chart-bars i { @apply bg-[#3b8eea]/25; border-color:#61a8ff; }
+  #weather-chart[data-mode="wind"] #chart-bars i { @apply bg-[#a6acb9]/20; border-color:#a6acb9; }
+  #weather-chart.weather-bounce { animation: weather-bounce .3s ease-out; }
+  #weather-days { @apply grid grid-cols-7 gap-2; }
+  #weather-days div { @apply flex flex-col items-center justify-center rounded-xl bg-white/[.05] text-xs; }
+  #weather-days b { @apply text-2xl; } #weather-days small { @apply font-mono; } #weather-days em { @apply not-italic text-[#8e939d]; }
   .system-grid { @apply grid h-full grid-cols-2 content-center gap-x-5 gap-y-4; }
   .metric-row { @apply flex items-center justify-between text-sm text-[#a6acb9]; }
   .metric-row svg { @apply size-5 fill-current; }
@@ -87,6 +171,24 @@
   #media-card { padding: 10px; }
   #system-card { padding: 10px 16px; }
 }
+
+@keyframes overlay-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes backdrop-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes overlay-fade-out { to { opacity: 0; } }
+@keyframes backdrop-fade-out { to { opacity: 0; } }
+@keyframes volume-exit { to { opacity:0; transform:translateY(12px) scale(.96); } }
+@keyframes clock-exit { to { opacity:0; transform:translateY(8px) scale(.985); } }
+@keyframes weather-exit { to { opacity:0; transform:translateX(18px) scale(.985); } }
+@keyframes volume-enter { from { opacity: 0; transform: translateY(16px) scale(.94); } 70% { transform: translateY(-2px) scale(1.008); } to { opacity: 1; transform: none; } }
+@keyframes clock-enter { from { opacity: 0; transform: translateY(12px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes weather-enter { from { opacity: 0; transform: translateX(22px) scale(.985); } 72% { transform: translateX(-2px) scale(1.002); } to { opacity: 1; transform: none; } }
+
+@keyframes month-change { 0% { opacity: 0; transform: translateY(var(--month-y)) scale(.985); } 72% { transform: translateY(calc(var(--month-y) * -.12)) scale(1.003); } 100% { opacity:1; transform:none; } }
+@keyframes digit-pulse { 50% { transform: translateY(-1px); } }
+@keyframes timer-in { from { opacity: 0; transform: scale(.8); } }
+@keyframes alarm-pulse { 50% { background-color: #d53748; } }
+@keyframes weather-bounce { 0% { opacity:.5; transform:translateX(18px) scale(.99); } 65% { transform:translateX(-3px); } }
+@keyframes city-change { 0% { opacity:.35; transform:translateY(8px) scale(.992); } 68% { transform:translateY(-1px) scale(1.001); } 100% { opacity:1; transform:none; } }
 
 @keyframes gauge-value {
   0%, 70% { opacity: 1; transform: translateY(0); }
