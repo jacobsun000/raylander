@@ -139,6 +139,8 @@ fn router() -> Router {
         .route("/ws", get(websocket))
         .route("/artwork", get(artwork))
         .route("/media/{action}", post(media_action))
+        .route("/volume/{percent}", post(set_volume))
+        .route("/workspace/{id}", post(focus_workspace))
         .route(
             "/assets/external-dock.css",
             get(|| async { stylesheet(EXTERNAL_DOCK_CSS) }),
@@ -170,6 +172,38 @@ async fn media_action(axum::extract::Path(action): axum::extract::Path<String>) 
     };
     match tokio::task::spawn_blocking(move || PlayerctlBackend.apply(None, action)).await {
         Ok(Ok(())) => StatusCode::NO_CONTENT,
+        _ => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+async fn set_volume(axum::extract::Path(percent): axum::extract::Path<u8>) -> StatusCode {
+    if percent > 100 {
+        return StatusCode::BAD_REQUEST;
+    }
+    let result = tokio::task::spawn_blocking(move || {
+        Command::new("wpctl")
+            .args(["set-volume", "@DEFAULT_AUDIO_SINK@", &format!("{percent}%")])
+            .status()
+    })
+    .await;
+    match result {
+        Ok(Ok(status)) if status.success() => StatusCode::NO_CONTENT,
+        _ => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+async fn focus_workspace(axum::extract::Path(id): axum::extract::Path<i32>) -> StatusCode {
+    if !(1..=27).contains(&id) {
+        return StatusCode::BAD_REQUEST;
+    }
+    let result = tokio::task::spawn_blocking(move || {
+        Command::new("hyprctl")
+            .args(["dispatch", &format!("hl.dsp.focus({{workspace={id}}})")])
+            .status()
+    })
+    .await;
+    match result {
+        Ok(Ok(status)) if status.success() => StatusCode::NO_CONTENT,
         _ => StatusCode::SERVICE_UNAVAILABLE,
     }
 }
@@ -429,10 +463,8 @@ fn media_fragment() -> String {
     let mut html = String::new();
     match PlayerctlBackend.current() {
         Ok(Some(media)) => {
-            html.push_str(r#"<div id="media-empty" class="media-empty hidden" hx-swap-oob="outerHTML"></div><div id="media-copy" class="media-copy" hx-swap-oob="outerHTML"><p id="media-title" class="value truncate"></p><p id="media-artist" class="truncate text-[9px] text-[#a6acb9]"></p><div class="media-controls"><button onclick="fetch('/media/previous',{method:'POST'})" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button><button onclick="fetch('/media/play-pause',{method:'POST'})" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg></button><button onclick="fetch('/media/next',{method:'POST'})" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 5l9 7-9 7z"/></svg></button></div></div>"#);
-            replace(&mut html, "media-title", &media.title);
-            replace(&mut html, "media-artist", &media.artists.join(", "));
-            if media.artwork_url.is_some() { html.push_str(r#"<img id="media-art" src="/artwork" alt="" hx-swap-oob="outerHTML" onerror="this.hidden=true" onload="this.hidden=false">"#); }
+            html.push_str(&format!(r#"<div id="media-empty" class="media-empty hidden" hx-swap-oob="outerHTML"></div><div id="media-copy" class="media-copy" hx-swap-oob="outerHTML"><p id="media-title" class="value truncate">{}</p><p id="media-artist" class="truncate text-[9px] text-[#a6acb9]">{}</p><div class="media-controls"><button onclick="fetch('/media/previous',{{method:'POST'}})" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button><button onclick="fetch('/media/play-pause',{{method:'POST'}})" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg></button><button onclick="fetch('/media/next',{{method:'POST'}})" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 5l9 7-9 7z"/></svg></button></div></div>"#, escape(&media.title), escape(&media.artists.join(", "))));
+            if media.artwork_url.is_some() { html.push_str(&format!(r#"<img id="media-art" src="/artwork?t={}" alt="" hx-swap-oob="outerHTML" onerror="this.hidden=true" onload="this.hidden=false">"#, Instant::now().elapsed().as_nanos())); }
         }
         _ => html.push_str(r#"<img id="media-art" hidden hx-swap-oob="outerHTML" alt=""><div id="media-empty" class="media-empty" hx-swap-oob="outerHTML" aria-hidden="true"><img src="/assets/arch-logo.png" alt=""></div><div id="media-copy" class="media-copy hidden" hx-swap-oob="outerHTML"></div>"#),
     }
@@ -694,7 +726,9 @@ fn hyprland_fragment() -> Option<String> {
                     format!(r#"<i class="{class}"></i>"#)
                 })
                 .collect::<String>();
-            format!(r#"<div class="monitor-view"><div class="workspace-dots">{dots}</div></div>"#)
+            format!(
+                r#"<div class="monitor-view" data-base="{base}" data-active="{active}"><div class="workspace-dots">{dots}</div></div>"#
+            )
         })
         .collect::<String>();
     Some(format!(

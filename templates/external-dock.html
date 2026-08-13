@@ -3,7 +3,38 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Raylander External Dock</title><link rel="stylesheet" href="/assets/external-dock.css">
   <script src="/assets/htmx.min.js"></script><script src="/assets/htmx-ext-ws.js"></script>
-  <script>const updateClock=()=>{const now=new Date(),time=document.querySelector("#local-time"),date=document.querySelector("#date"),timeZone="America/Chicago";if(time)time.textContent=now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:false,timeZone});if(date)date.textContent=now.toLocaleDateString([],{month:"short",day:"numeric",weekday:"short",timeZone})};const syncDisplayPower=()=>{const state=document.querySelector("#display-power")?.dataset.on!=="false";globalThis.RaylanderAndroid?.setDisplayEnabled(state)};document.addEventListener("DOMContentLoaded",()=>{updateClock();setInterval(updateClock,1000);syncDisplayPower();new MutationObserver(syncDisplayPower).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:["data-on"]})});document.addEventListener("htmx:wsClose",()=>{const retry=()=>fetch("/",{cache:"no-store"}).then(r=>r.ok?location.reload():setTimeout(retry,1000)).catch(()=>setTimeout(retry,1000));setTimeout(retry,1000)},{once:true});</script>
+  <script>
+  const post = path => fetch(path, {method: "POST"});
+  let volumeTimer, pendingVolume;
+  const sendVolume = () => { const value=pendingVolume; volumeTimer=undefined; post(`/volume/${value}`).finally(()=>{if(pendingVolume!==value&&!volumeTimer)volumeTimer=setTimeout(sendVolume,32)}) };
+  const setVolume = value => {
+    const percent = Math.max(0, Math.min(100, Math.round(value)));
+    document.querySelector("#volume-fill").style.height = `${percent}%`;
+    document.querySelector("#volume-dialog-fill").style.height = `${percent}%`;
+    document.querySelector("#volume-dialog-value").textContent = `${percent}%`;
+    pendingVolume=percent;
+    if(!volumeTimer)volumeTimer=setTimeout(sendVolume,32);
+  };
+  const updateClock=()=>{const now=new Date(),time=document.querySelector("#local-time"),date=document.querySelector("#date"),timeZone="America/Chicago";if(time)time.textContent=now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:false,timeZone});if(date)date.textContent=now.toLocaleDateString([],{month:"short",day:"numeric",weekday:"short",timeZone})};
+  const syncDisplayPower=()=>{const state=document.querySelector("#display-power")?.dataset.on!=="false";globalThis.RaylanderAndroid?.setDisplayEnabled(state)};
+  const bindGestures=()=>{
+    const gauge=document.querySelector("#volume-gauge"); let startY=0,moved=false,last=-1;
+    gauge.onpointerdown=e=>{e.preventDefault();startY=e.clientY;moved=false;gauge.setPointerCapture(e.pointerId)};
+    gauge.onpointermove=e=>{if(!gauge.hasPointerCapture(e.pointerId))return;if(Math.abs(e.clientY-startY)>5)moved=true;const r=gauge.getBoundingClientRect(),value=(r.bottom-e.clientY)/r.height*100;if(moved&&Math.round(value)!==last){last=Math.round(value);setVolume(value)}};
+    const dialog=document.querySelector("#volume-dialog"),largeGauge=document.querySelector("#volume-dialog-gauge");let closeTimer;
+    const keepDialogOpen=()=>{clearTimeout(closeTimer);closeTimer=setTimeout(()=>dialog.close(),5000)};
+    const openDialog=()=>{dialog.showModal();const height=parseFloat(document.querySelector("#volume-fill").style.height)||0;document.querySelector("#volume-dialog-fill").style.height=`${height}%`;document.querySelector("#volume-dialog-value").textContent=`${Math.round(height)}%`;keepDialogOpen()};
+    gauge.onpointerup=()=>{if(!moved)openDialog()};
+    const updateLargeGauge=e=>{const r=largeGauge.getBoundingClientRect();setVolume((r.bottom-e.clientY)/r.height*100);keepDialogOpen()};
+    largeGauge.onpointerdown=e=>{e.preventDefault();largeGauge.setPointerCapture(e.pointerId)};
+    largeGauge.onpointermove=e=>{if(largeGauge.hasPointerCapture(e.pointerId))updateLargeGauge(e)};
+    largeGauge.onwheel=e=>{e.preventDefault();const current=parseFloat(document.querySelector("#volume-dialog-fill").style.height)||0;setVolume(current-Math.sign(e.deltaY)*2);keepDialogOpen()};
+    dialog.onclick=e=>{if(e.target.id==="volume-dialog"){clearTimeout(closeTimer);dialog.close()}};
+    document.addEventListener("pointerdown",e=>{const monitor=e.target.closest("#monitors .monitor-view");if(!monitor)return;const x=e.clientX;monitor.setPointerCapture(e.pointerId);monitor.onpointerup=up=>{const delta=up.clientX-x,base=Number(monitor.dataset.base),active=Number(monitor.dataset.active);const steps=Math.min(8,Math.floor(Math.abs(delta)/25));let target=active;if(steps)target=Math.max(base,Math.min(base+8,active+(delta<0?steps:-steps)));post(`/workspace/${target}`)}});
+  };
+  document.addEventListener("DOMContentLoaded",()=>{updateClock();setInterval(updateClock,1000);syncDisplayPower();bindGestures();new MutationObserver(syncDisplayPower).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:["data-on"]})});
+  document.addEventListener("htmx:wsClose",()=>{const retry=()=>fetch("/",{cache:"no-store"}).then(r=>r.ok?location.reload():setTimeout(retry,1000)).catch(()=>setTimeout(retry,1000));setTimeout(retry,1000)},{once:true});
+  </script>
 </head>
 <body class="min-h-screen bg-[#0b0c0f] font-sans text-[#f1f2f5] antialiased [color-scheme:dark]">
 <div id="display-power" data-on="true" hidden></div>
@@ -14,7 +45,7 @@
   </section>
 
   <section id="controls-card" class="card controls-card">
-    <div class="ios-gauge"><div id="volume-fill" class="ios-fill bg-[#f1f2f5]"></div><div class="gauge-content"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9H3Zm13.5 3a4.5 4.5 0 0 0-2.5-4.03v8.05A4.5 4.5 0 0 0 16.5 12Z"/></svg><span id="volume" class="gauge-percent"></span></div></div>
+    <div id="volume-gauge" class="ios-gauge touch-none"><div id="volume-fill" class="ios-fill bg-[#f1f2f5]"></div><div class="gauge-content"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9H3Zm13.5 3a4.5 4.5 0 0 0-2.5-4.03v8.05A4.5 4.5 0 0 0 16.5 12Z"/></svg><span id="volume" class="gauge-percent"></span></div></div>
     <div class="ios-gauge"><div id="brightness-fill" class="ios-fill bg-[#f1f2f5]"></div><div class="gauge-content"><svg viewBox="0 0 24 24"><path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5h1v3h-2V2h1Zm0 17h1v3h-2v-3h1ZM2 11h3v2H2v-2Zm17 0h3v2h-3v-2ZM4.22 5.64l1.42-1.42 2.12 2.12-1.42 1.42-2.12-2.12Zm12.02 12.02 1.42-1.42 2.12 2.12-1.42 1.42-2.12-2.12ZM4.22 18.36l2.12-2.12 1.42 1.42-2.12 2.12-1.42-1.42ZM16.24 6.34l2.12-2.12 1.42 1.42-2.12 2.12-1.42-1.42Z"/></svg><span id="brightness" class="gauge-percent"></span></div></div>
   </section>
   <section id="bluetooth-card" class="card control-grid">
@@ -24,7 +55,7 @@
     <span class="control-icon text-lg" title="Reserved">＋</span>
   </section>
   <section id="packages-card" class="card"><p class="label">Updates</p><p id="packages-total" class="big-number">—</p><div class="chips"><span id="packages-pacman" title="Official packages">◆ —</span><span id="packages-paru" title="AUR packages">▲ —</span></div></section>
-  <section id="focus-card" class="card"><div id="monitors" class="monitor-layout"><p class="focus-title">Desktop</p><div class="monitor-grid"><div class="monitor-view"><div class="workspace-dots"><i class="active focused"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div></div></section>
+  <section id="focus-card" class="card"><div id="monitors" class="monitor-layout"><p class="focus-title">Desktop</p><div class="monitor-grid"><div class="monitor-view" data-base="1" data-active="1"><div class="workspace-dots"><i class="active focused"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div></div></section>
 
   <section id="media-card" class="card media-card">
     <img id="media-art" src="/artwork" alt="" onerror="this.hidden=true" onload="this.hidden=false">
@@ -41,4 +72,6 @@
   <section id="placeholder-card-2" class="card grid place-items-center"><span class="text-2xl text-[#666d7b]">＋</span></section>
   <section id="placeholder-card-3" class="card grid place-items-center"><span class="text-2xl text-[#666d7b]">＋</span></section>
   <section id="placeholder-card-4" class="card grid place-items-center"><span class="text-2xl text-[#666d7b]">＋</span></section>
-</main></body></html>
+</main>
+<dialog id="volume-dialog" class="volume-dialog"><div class="volume-dialog-panel"><p>Volume</p><div id="volume-dialog-gauge" class="ios-gauge volume-dialog-gauge"><div id="volume-dialog-fill" class="ios-fill bg-[#f1f2f5]"></div><div class="gauge-content"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9H3Zm13.5 3a4.5 4.5 0 0 0-2.5-4.03v8.05A4.5 4.5 0 0 0 16.5 12Z"/></svg><span id="volume-dialog-value">0%</span></div></div></div></dialog>
+</body></html>

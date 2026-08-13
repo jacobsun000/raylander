@@ -31,9 +31,9 @@
   .chips { @apply mt-2 flex gap-1 font-mono text-[8px] text-[#a6acb9]; }
   .chips span { @apply rounded bg-white/[.06] px-1 py-0.5; }
   .accent-meta { @apply mt-2 truncate font-mono text-[9px] text-[#0a7cff]; }
-  .media-card { @apply relative p-0; }
-  .media-card img { @apply absolute inset-0 size-full object-cover; }
-  .media-copy { @apply absolute inset-x-0 bottom-0 z-10 p-3 text-center; }
+  .media-card { @apply relative flex flex-col items-center justify-center gap-2 p-3; }
+  .media-card > #media-art { @apply static z-0 aspect-square size-[min(52%,140px)] shrink-0 rounded-xl bg-[#343840] object-contain; }
+  .media-copy { @apply static z-10 w-full p-0 text-center; }
   .media-empty { @apply absolute inset-0 grid place-items-center; }
   .media-empty img { @apply static size-40 object-contain; }
   .media-controls { @apply mt-2 flex items-center justify-center gap-4; }
@@ -48,6 +48,15 @@
   .workspace-dots i.occupied { @apply border-[#0a7cff]; }
   .workspace-dots i.active { @apply border-[#0a7cff] bg-[#0a7cff]; }
   .workspace-dots i.active.focused { @apply border-[#f59e0b] bg-[#f59e0b]; }
+  .monitor-view { touch-action: pan-y; }
+  .volume-dialog { @apply m-auto border-0 bg-transparent p-0 text-white outline-none backdrop:bg-black/70; -webkit-tap-highlight-color: transparent; user-select: none; }
+  .volume-dialog:focus, .volume-dialog *:focus { outline: none; }
+  .volume-dialog-panel { @apply flex h-[340px] w-[210px] flex-col items-center gap-4 rounded-[30px] border border-white/15 bg-[#16181e] p-5 shadow-2xl; }
+  .volume-dialog-panel > p { @apply text-sm font-semibold; }
+  .volume-dialog-gauge { @apply max-h-none min-h-0 w-28 flex-none cursor-default touch-none; height: 260px; -webkit-tap-highlight-color: transparent; user-select: none; }
+  .volume-dialog-gauge .gauge-content { @apply gap-3 text-xl; }
+  .volume-dialog-gauge .gauge-content svg { @apply size-10; }
+  .volume-dialog-gauge #volume-dialog-value { @apply static font-mono text-xl opacity-100; }
   .system-grid { @apply grid h-full grid-cols-2 content-center gap-x-5 gap-y-4; }
   .metric-row { @apply flex items-center justify-between text-sm text-[#a6acb9]; }
   .metric-row svg { @apply size-5 fill-current; }
@@ -75,7 +84,7 @@
   #clock-card .status-dot { right: 12px; top: 12px; }
   #clock-card .label { font-size: 11px; }
   #clock-card time { margin-top: 8px; font-size: clamp(2.75rem, 7vw, 3.5rem); }
-  #media-card { padding: 0; }
+  #media-card { padding: 10px; }
   #system-card { padding: 10px 16px; }
 }
 
