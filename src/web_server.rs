@@ -28,7 +28,7 @@ use crate::{
     config::ExternalDockConfig,
     display::DdcutilBackend,
     herdr::{AgentStatus, HerdrBackend},
-    input_method::{Fcitx5Backend, InputMethodStatus},
+    input_method::{Fcitx5Backend, InputMethodAction, InputMethodStatus},
     media::{MediaAction, PlayerctlBackend},
     network::NmcliBackend,
     packages::PackageBackend,
@@ -64,6 +64,7 @@ enum DockEvent {
     DisplayPower,
     Agents,
     Calendar,
+    Connectivity,
 }
 
 pub(crate) fn notify_display_power() {
@@ -160,6 +161,14 @@ fn router() -> Router {
         .route("/media/{action}", post(media_action))
         .route("/volume/{percent}", post(set_volume))
         .route("/brightness/{percent}", post(set_brightness))
+        .route("/screenshot", post(open_screenshot))
+        .route("/input-method/toggle", post(toggle_input_method))
+        .route("/bluetooth/power", post(bluetooth_power))
+        .route("/bluetooth/scan", post(bluetooth_scan))
+        .route(
+            "/bluetooth/device/{address}/{action}",
+            post(bluetooth_device),
+        )
         .route("/agent/focus", post(focus_agent))
         .route("/agent/focus/{pane_id}", post(focus_agent_by_id))
         .route("/workspace/{id}", post(focus_workspace))
@@ -212,6 +221,96 @@ async fn set_volume(axum::extract::Path(percent): axum::extract::Path<u8>) -> St
     })
     .await;
     match result {
+        Ok(Ok(status)) if status.success() => StatusCode::NO_CONTENT,
+        _ => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+async fn bluetooth_power() -> StatusCode {
+    let result = async {
+        let state = BluetoothBackend.state().await?;
+        let adapter = state.adapters.first().context("no Bluetooth adapter")?;
+        BluetoothBackend
+            .set_adapter_powered(&adapter.path, !adapter.powered)
+            .await
+    }
+    .await;
+    if result.is_ok() {
+        if let Some(events) = EVENTS.get() {
+            let _ = events.send(DockEvent::Connectivity);
+        }
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
+}
+
+async fn bluetooth_scan() -> StatusCode {
+    let result = async {
+        let state = BluetoothBackend.state().await?;
+        let adapter = state.adapters.first().context("no Bluetooth adapter")?;
+        BluetoothBackend
+            .set_discovering(&adapter.path, !adapter.discovering)
+            .await
+    }
+    .await;
+    if result.is_ok() {
+        if let Some(events) = EVENTS.get() {
+            let _ = events.send(DockEvent::Connectivity);
+        }
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
+}
+
+async fn bluetooth_device(
+    axum::extract::Path((address, action)): axum::extract::Path<(String, String)>,
+) -> StatusCode {
+    let result = match action.as_str() {
+        "pair" => BluetoothBackend.pair_device(&address).await,
+        "connect" => {
+            BluetoothBackend
+                .set_device_connected_by_address(&address, true)
+                .await
+        }
+        "disconnect" => {
+            BluetoothBackend
+                .set_device_connected_by_address(&address, false)
+                .await
+        }
+        _ => return StatusCode::NOT_FOUND,
+    };
+    if result.is_ok() {
+        if let Some(events) = EVENTS.get() {
+            let _ = events.send(DockEvent::Connectivity);
+        }
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
+}
+
+async fn toggle_input_method() -> StatusCode {
+    match tokio::task::spawn_blocking(|| Fcitx5Backend.apply(&InputMethodAction::Toggle)).await {
+        Ok(Ok(())) => {
+            if let Some(events) = EVENTS.get() {
+                let _ = events.send(DockEvent::InputMethod);
+            }
+            StatusCode::NO_CONTENT
+        }
+        _ => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+async fn open_screenshot() -> StatusCode {
+    match tokio::task::spawn_blocking(|| {
+        Command::new("hyprctl")
+            .args(["dispatch", "hl.plugin.hyprcapture.open"])
+            .status()
+    })
+    .await
+    {
         Ok(Ok(status)) if status.success() => StatusCode::NO_CONTENT,
         _ => StatusCode::SERVICE_UNAVAILABLE,
     }
@@ -652,6 +751,7 @@ fn event_fragment(event: DockEvent) -> String {
         DockEvent::DisplayPower => display_power_fragment(),
         DockEvent::Agents => agents_fragment(),
         DockEvent::Calendar => calendar_events_fragment(),
+        DockEvent::Connectivity => dashboard_fragment(),
     }
 }
 
@@ -673,9 +773,9 @@ fn volume_fragment() -> String {
 fn input_method_fragment() -> String {
     let input = Fcitx5Backend.current().ok();
     let class = match input.as_ref().map(|state| &state.status) {
-        Some(InputMethodStatus::Active) => "control-icon active font-mono text-[10px]",
-        Some(InputMethodStatus::Inactive) => "control-icon font-mono text-[10px]",
-        _ => "control-icon warning font-mono text-[10px]",
+        Some(InputMethodStatus::Active) => "control-icon input-icon active",
+        Some(InputMethodStatus::Inactive) => "control-icon input-icon",
+        _ => "control-icon input-icon warning",
     };
     let label = input
         .and_then(|state| state.name)
@@ -917,17 +1017,35 @@ fn dashboard_fragment() -> String {
             };
             let input = Fcitx5Backend.current().ok();
             let input_class = match input.as_ref().map(|state| &state.status) {
-                Some(InputMethodStatus::Active) => "control-icon active font-mono text-[10px]",
-                Some(InputMethodStatus::Inactive) => "control-icon font-mono text-[10px]",
-                _ => "control-icon warning font-mono text-[10px]",
+                Some(InputMethodStatus::Active) => "control-icon input-icon active",
+                Some(InputMethodStatus::Inactive) => "control-icon input-icon",
+                _ => "control-icon input-icon warning",
             };
             let input_label = input.and_then(|state| state.name).map(|name| {
                 if name.contains("pinyin") { "中" } else { "A" }
             }).unwrap_or("?");
             let mut fragment = String::new();
-            class_replace(&mut fragment, "bluetooth-control", bluetooth_class, "ᛒ");
-            class_replace(&mut fragment, "network-control", network_class, r#"<svg viewBox="0 0 24 24"><path d="M2 8.8a16 16 0 0 1 20 0l-2 2.4a12.8 12.8 0 0 0-16 0L2 8.8Zm4 4.8a9.6 9.6 0 0 1 12 0L16 16a6.4 6.4 0 0 0-8 0l-2-2.4ZM9.8 18.4a3.2 3.2 0 0 1 4.4 0L12 21l-2.2-2.6Z"/></svg>"#);
+            class_replace(&mut fragment, "bluetooth-control", bluetooth_class, r#"<svg viewBox="0 0 24 24"><path d="M12 2v20M12 2l7 6-7 5M12 22l7-6-7-5M5 7l14 9M5 17 19 8"/></svg>"#);
+            class_replace(&mut fragment, "network-control", network_class, r#"<svg viewBox="0 0 24 24"><path d="M4 10a13 13 0 0 1 16 0M8 15a6.5 6.5 0 0 1 8 0"/><circle cx="12" cy="19" r="1.4"/></svg>"#);
             class_replace(&mut fragment, "input-control", input_class, input_label);
+            let powered = state.adapters.first().is_some_and(|adapter| adapter.powered);
+            let discovering = state.adapters.first().is_some_and(|adapter| adapter.discovering);
+            let devices = state.devices.iter().map(|device| {
+                let action = if device.connected { "disconnect" } else if device.paired { "connect" } else { "pair" };
+                let label = if device.connected { "Disconnect" } else if device.paired { "Connect" } else { "Pair" };
+                format!(r#"<article class="connectivity-item bluetooth-device"><span><b>{}</b><small>{}</small></span><button onclick="event.stopPropagation();bluetoothAction('{}','{}',this)">{}</button></article>"#, escape(&device.name), escape(&device.address), escape(&device.address), action, label)
+            }).collect::<String>();
+            let devices = if devices.is_empty() { r#"<p class="connectivity-empty">No devices found</p>"#.to_owned() } else { devices };
+            fragment.push_str(&format!(r#"<div id="bluetooth-panel" class="connectivity-panel" hx-swap-oob="outerHTML"><header><h2>Bluetooth</h2><div class="connectivity-actions"><button onclick="bluetoothCommand('power',this)">{}</button><button onclick="bluetoothCommand('scan',this)">{}</button></div></header><main>{devices}</main></div>"#, if powered { "Turn off" } else { "Turn on" }, if discovering { "Stop scan" } else { "Add device" }));
+            let mut networks = network.as_ref().map(|state| state.connections.iter().filter(|connection| connection.device == "enp5s0" || connection.kind.contains("ethernet")).map(|connection| format!(r#"<article class="connectivity-item connected"><span><b>{}</b><small>{}</small></span><em>Wired · Connected</em></article>"#, escape(&connection.name), escape(&connection.device))).collect::<String>()).unwrap_or_default();
+            if let Ok(output) = Command::new("tailscale").args(["status", "--json"]).output() && output.status.success() && let Ok(status) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
+                let online = status.pointer("/Self/Online").and_then(serde_json::Value::as_bool).unwrap_or(false);
+                let name = status.pointer("/Self/DNSName").and_then(serde_json::Value::as_str).unwrap_or("Tailscale").trim_end_matches('.');
+                networks.push_str(&format!(r#"<article class="connectivity-item tailscale"><span><b>Tailscale</b><small>{}</small></span><em>{}</em></article>"#, escape(name), if online { "Connected" } else { "Offline" }));
+            }
+            networks.push_str(&Command::new("nmcli").args(["--terse", "--fields", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "yes"]).output().ok().filter(|output| output.status.success()).map(|output| String::from_utf8_lossy(&output.stdout).lines().filter_map(|line| { let mut fields = line.splitn(4, ':'); let active = fields.next()? == "*"; let name = fields.next()?; let signal = fields.next()?; let security = fields.next().unwrap_or_default(); (!name.is_empty()).then(|| format!(r#"<article class="connectivity-item"><span><b>{}</b><small>{}</small></span><em>{}%{}</em></article>"#, escape(name), escape(security), escape(signal), if active { " · Connected" } else { "" })) }).collect::<String>()).unwrap_or_default());
+            let networks = if networks.is_empty() { r#"<p class="connectivity-empty">No networks</p>"#.to_owned() } else { networks };
+            fragment.push_str(&format!(r#"<div id="network-panel" class="connectivity-panel" hx-swap-oob="outerHTML"><header><h2>Wi-Fi</h2><span>Networks</span></header><main>{networks}</main></div>"#));
             Some(fragment)
         },
     ));
@@ -1162,8 +1280,16 @@ fn raw_replace(html: &mut String, id: &str, value: &str) {
     ));
 }
 fn class_replace(html: &mut String, id: &str, class: &str, value: &str) {
+    let action = match id {
+        "bluetooth-control" => {
+            r#" onclick="document.querySelector('#bluetooth-dialog').showModal()""#
+        }
+        "network-control" => r#" onclick="document.querySelector('#network-dialog').showModal()""#,
+        "input-control" => r#" onclick="fetch('/input-method/toggle',{method:'POST'})""#,
+        _ => "",
+    };
     html.push_str(&format!(
-        r#"<span id="{id}" class="{class}" hx-swap-oob="outerHTML">{value}</span>"#
+        r#"<span id="{id}" class="{class}"{action} hx-swap-oob="outerHTML">{value}</span>"#
     ));
 }
 fn escape(value: &str) -> String {

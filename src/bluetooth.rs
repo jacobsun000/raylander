@@ -127,6 +127,72 @@ impl BluetoothBackend {
             .context("set BlueZ adapter power")
     }
 
+    pub async fn set_discovering(&self, adapter_path: &str, discovering: bool) -> Result<()> {
+        let state = self.state().await?;
+        ensure_available(&state)?;
+        if !state
+            .adapters
+            .iter()
+            .any(|adapter| adapter.path == adapter_path)
+        {
+            bail!("unknown Bluetooth adapter path: {adapter_path}");
+        }
+        let connection = Connection::system()
+            .await
+            .context("connect to system D-Bus")?;
+        let proxy = Proxy::new(&connection, BLUEZ, adapter_path, ADAPTER_IFACE)
+            .await
+            .context("create BlueZ adapter proxy")?;
+        let method = if discovering {
+            "StartDiscovery"
+        } else {
+            "StopDiscovery"
+        };
+        proxy
+            .call::<_, _, ()>(method, &())
+            .await
+            .with_context(|| method.to_owned())
+    }
+
+    pub async fn pair_device(&self, address: &str) -> Result<()> {
+        let state = self.state().await?;
+        ensure_available(&state)?;
+        let device = state
+            .devices
+            .iter()
+            .find(|device| device.address == address)
+            .with_context(|| format!("unknown Bluetooth device: {address}"))?;
+        if device.paired {
+            return Ok(());
+        }
+        let connection = Connection::system()
+            .await
+            .context("connect to system D-Bus")?;
+        let proxy = Proxy::new(&connection, BLUEZ, device.path.as_str(), DEVICE_IFACE)
+            .await
+            .context("create BlueZ device proxy")?;
+        proxy
+            .call::<_, _, ()>("Pair", &())
+            .await
+            .context("pair Bluetooth device")
+    }
+
+    pub async fn set_device_connected_by_address(
+        &self,
+        address: &str,
+        connected: bool,
+    ) -> Result<()> {
+        let state = self.state().await?;
+        let path = state
+            .devices
+            .iter()
+            .find(|device| device.address == address)
+            .with_context(|| format!("unknown Bluetooth device: {address}"))?
+            .path
+            .clone();
+        self.set_device_connected(&path, connected).await
+    }
+
     /// Connects or disconnects a known paired device. Unpaired devices are intentionally rejected.
     pub async fn set_device_connected(&self, device_path: &str, connected: bool) -> Result<()> {
         let state = self.state().await?;

@@ -9,8 +9,35 @@
   .compact-card { @apply flex items-center justify-center gap-2; }
   .round-icon { @apply grid size-9 shrink-0 place-items-center rounded-xl; }
   .control-grid { @apply grid grid-cols-2 place-items-center gap-2; }
-  .control-icon { @apply grid size-11 place-items-center rounded-full bg-white/10 text-[#666d7b] transition-colors; }
-  .control-icon svg { @apply size-5 fill-current; }
+  .control-icon { @apply grid size-11 place-items-center rounded-full border-0 bg-white/10 p-0 text-white transition duration-150; }
+  .control-icon:active { transform:scale(.94); }
+  .control-icon svg { @apply size-6 overflow-visible; fill:none; stroke:currentColor; stroke-width:2.6; stroke-linecap:round; stroke-linejoin:round; }
+  #bluetooth-control svg { @apply size-[21px]; stroke-width:2.4; }
+  .control-icon svg circle { fill:currentColor; stroke:none; }
+  .input-icon { @apply font-sans text-2xl font-semibold leading-none; }
+  .screenshot-control { @apply bg-[#e8782f] text-white; }
+  .connectivity-dialog[open] .connectivity-panel { animation:agent-dialog-enter .25s ease-out both; }
+  .connectivity-dialog.closing .connectivity-panel { animation:agent-dialog-exit .24s ease-in both; }
+  .connectivity-panel { @apply grid h-full grid-cols-[150px_1fr] overflow-hidden rounded-[18px] border border-white/10 bg-[#16181e] shadow-2xl; }
+  .connectivity-panel header { @apply flex flex-col justify-between border-r border-white/10 bg-[#111319] p-6; }
+  .connectivity-panel h2 { @apply text-xl font-semibold; }
+  .connectivity-panel header span { @apply font-mono text-xs uppercase text-[#a6acb9]; }
+  .connectivity-actions { @apply grid gap-2; }
+  .connectivity-actions button, .bluetooth-device button { @apply min-h-8 rounded-lg border border-white/10 bg-white/10 px-3 text-xs font-semibold text-white transition duration-150; }
+  .connectivity-actions button:active, .bluetooth-device button:active { transform:scale(.97); }
+  .connectivity-actions button:disabled, .bluetooth-device button:disabled { @apply opacity-40; }
+  .bluetooth-device button { @apply shrink-0 text-[#61a8ff]; }
+  .connectivity-panel main { @apply grid content-start gap-2 overflow-y-auto p-5; scrollbar-width:none; }
+  .connectivity-panel main::-webkit-scrollbar { display:none; }
+  .connectivity-item { @apply flex min-h-14 items-center justify-between rounded-xl border border-white/10 bg-[#1d2029] px-4; animation:calendar-event-enter .28s ease-out both; }
+  .connectivity-item span { @apply flex min-w-0 flex-col; }
+  .connectivity-item b { @apply truncate text-sm; }
+  .connectivity-item small { @apply truncate font-mono text-[10px] text-[#a6acb9]; }
+  .connectivity-item em { @apply shrink-0 font-mono text-[10px] not-italic text-[#61a8ff]; }
+  .connectivity-item.connected { @apply border-[#22a857]/50 bg-[#22a857]/10; }
+  .connectivity-item.connected em { @apply text-[#22a857]; }
+  .connectivity-item.tailscale { @apply border-[#a6acb9]/30; }
+  .connectivity-empty { @apply self-center text-center text-xs text-[#666d7b]; }
   .control-icon.active { @apply bg-[#0a7cff] text-white; }
   .control-icon.connected { @apply bg-[#22a857] text-white; }
   .control-icon.warning { @apply bg-[#e8a13a] text-[#0b0c0f]; }
