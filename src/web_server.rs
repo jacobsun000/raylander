@@ -314,6 +314,7 @@ fn observe_hyprland() {
 #[serde(rename_all = "camelCase")]
 struct HyprMonitor {
     id: i32,
+    focused: bool,
     active_workspace: HyprWorkspaceRef,
 }
 #[derive(Deserialize)]
@@ -636,10 +637,14 @@ fn hyprland_fragment() -> Option<String> {
     Some(monitors.into_iter().map(|monitor| {
         let base = monitor.id * 9 + 1;
         let active = monitor.active_workspace.id;
-        let title = workspaces.iter().find(|workspace| workspace.id == active)
-            .map(|workspace| workspace.last_window_title.as_str())
-            .filter(|title| !title.trim().is_empty())
-            .unwrap_or("Desktop");
+        let title = if monitor.focused {
+            workspaces.iter().find(|workspace| workspace.id == active)
+                .map(|workspace| workspace.last_window_title.as_str())
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or("Desktop")
+        } else {
+            ""
+        };
         let title = if title.to_ascii_lowercase().contains("firefox") { "Firefox" } else { title };
         let dots = [6, 7, 8, 3, 4, 5, 0, 1, 2].into_iter().map(|offset| {
             let id = base + offset;
