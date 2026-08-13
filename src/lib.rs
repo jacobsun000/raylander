@@ -1,5 +1,6 @@
 mod app;
 mod audio;
+mod audio_visualizer;
 pub mod bluetooth;
 pub mod calendar;
 mod calendar_events;

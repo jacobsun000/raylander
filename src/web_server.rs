@@ -23,13 +23,14 @@ use tokio::sync::{broadcast, oneshot};
 
 use crate::{
     audio::{AudioObserver, WpctlBackend},
+    audio_visualizer,
     bluetooth::{BluetoothAvailability, BluetoothBackend},
     calendar_events::{CalendarEvent, GoogleCalendarBackend},
     config::ExternalDockConfig,
     display::DdcutilBackend,
     herdr::{AgentStatus, HerdrBackend},
     input_method::{Fcitx5Backend, InputMethodAction, InputMethodStatus},
-    media::{MediaAction, PlayerctlBackend},
+    media::{MediaAction, PlaybackStatus, PlayerctlBackend},
     network::NmcliBackend,
     packages::PackageBackend,
     system_status::SystemStatusBackend,
@@ -47,6 +48,7 @@ static DOCK_DISPLAY: OnceLock<u32> = OnceLock::new();
 static AGENT_STATE: OnceLock<Mutex<AgentWidgetState>> = OnceLock::new();
 static CALENDAR_URLS: OnceLock<Vec<String>> = OnceLock::new();
 static CALENDAR_EVENTS: OnceLock<Mutex<Vec<CalendarEvent>>> = OnceLock::new();
+static SPECTRUM: OnceLock<Mutex<[u8; 16]>> = OnceLock::new();
 
 #[derive(Default)]
 struct AgentWidgetState {
@@ -65,6 +67,7 @@ enum DockEvent {
     Agents,
     Calendar,
     Connectivity,
+    Spectrum,
 }
 
 pub(crate) fn notify_display_power() {
@@ -200,7 +203,8 @@ async fn index() -> Response {
 async fn media_action(axum::extract::Path(action): axum::extract::Path<String>) -> StatusCode {
     let action = match action.as_str() {
         "previous" => MediaAction::Previous,
-        "play-pause" => MediaAction::PlayPause,
+        "play" => MediaAction::Play,
+        "pause" => MediaAction::Pause,
         "next" => MediaAction::Next,
         _ => return StatusCode::NOT_FOUND,
     };
@@ -515,10 +519,11 @@ async fn send_time(mut socket: WebSocket) {
 
 fn start_event_sources(events: broadcast::Sender<DockEvent>) {
     let (observer, audio_events) = AudioObserver::start();
+    let volume_events = events.clone();
     thread::spawn(move || {
         let _observer = observer;
         while audio_events.recv().is_ok() {
-            let _ = events.send(DockEvent::Volume);
+            let _ = volume_events.send(DockEvent::Volume);
         }
     });
     observe_command(
@@ -536,6 +541,16 @@ fn start_event_sources(events: broadcast::Sender<DockEvent>) {
     observe_hyprland();
     observe_agents();
     observe_calendar();
+    let spectrum = audio_visualizer::observe();
+    thread::spawn(move || {
+        while let Ok(levels) = spectrum.recv() {
+            *SPECTRUM
+                .get_or_init(|| Mutex::new([0; 16]))
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = levels;
+            let _ = events.send(DockEvent::Spectrum);
+        }
+    });
 }
 
 fn observe_calendar() {
@@ -752,6 +767,7 @@ fn event_fragment(event: DockEvent) -> String {
         DockEvent::Agents => agents_fragment(),
         DockEvent::Calendar => calendar_events_fragment(),
         DockEvent::Connectivity => dashboard_fragment(),
+        DockEvent::Spectrum => spectrum_fragment(),
     }
 }
 
@@ -800,14 +816,61 @@ fn hyprland_oob_fragment() -> String {
     html
 }
 
+fn spectrum_fragment() -> String {
+    let levels = *SPECTRUM
+        .get_or_init(|| Mutex::new([0; 16]))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let levels = levels
+        .iter()
+        .map(u8::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"<div id="spectrum-data" data-levels="{levels}" hidden hx-swap-oob="outerHTML"></div>"#
+    )
+}
+
+fn media_primary_control(status: PlaybackStatus) -> &'static str {
+    if status == PlaybackStatus::Playing {
+        r#"<button class="media-primary playing" onclick="fetch('/media/pause',{method:'POST'})" aria-label="Pause"><svg class="play-icon" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg><svg class="pause-icon" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button>"#
+    } else {
+        r#"<button class="media-primary" onclick="fetch('/media/play',{method:'POST'})" aria-label="Play"><svg class="play-icon" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg><svg class="pause-icon" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button>"#
+    }
+}
+
+fn media_fullscreen(media: &crate::media::MediaState) -> String {
+    let primary = media_primary_control(media.status);
+    let progress = match (media.position_micros, media.duration_micros) {
+        (Some(position), Some(duration)) if duration > 0 => {
+            (position.saturating_mul(100) / duration).min(100)
+        }
+        _ => 0,
+    };
+    let playing = if media.status == PlaybackStatus::Playing {
+        " playing"
+    } else {
+        ""
+    };
+    format!(
+        r#"<div id="media-full-panel" class="media-full-panel no-lyrics{playing}" hx-swap-oob="outerHTML"><div class="media-full-ambient"><i></i><i></i><i></i></div><div id="media-visualizer" class="media-visualizer"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><section class="media-full-left"><img src="/artwork" alt="Album artwork"><h2>{}</h2><p>{}</p><div class="media-progress-wrap"><div class="media-progress"><i style="width:{progress}%"></i></div></div><div class="media-full-controls"><button onclick="fetch('/media/previous',{{method:'POST'}})"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button>{primary}<button onclick="fetch('/media/next',{{method:'POST'}})"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 5l9 7-9 7z"/></svg></button></div></section></div>"#,
+        escape(&media.title),
+        escape(&media.artists.join(", "))
+    )
+}
+
 fn media_fragment() -> String {
     let mut html = String::new();
     match PlayerctlBackend.current() {
         Ok(Some(media)) => {
-            html.push_str(&format!(r#"<div id="media-empty" class="media-empty hidden" hx-swap-oob="outerHTML"></div><div id="media-copy" class="media-copy" hx-swap-oob="outerHTML"><p id="media-title" class="value truncate">{}</p><p id="media-artist" class="truncate text-[9px] text-[#a6acb9]">{}</p><div class="media-controls"><button onclick="fetch('/media/previous',{{method:'POST'}})" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button><button onclick="fetch('/media/play-pause',{{method:'POST'}})" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg></button><button onclick="fetch('/media/next',{{method:'POST'}})" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 5l9 7-9 7z"/></svg></button></div></div>"#, escape(&media.title), escape(&media.artists.join(", "))));
+            let playing = if media.status == PlaybackStatus::Playing { " playing" } else { "" };
+            let primary_action = media_primary_control(media.status);
+            html.push_str(&format!(r#"<div id="media-ambient" class="media-ambient{playing}" hx-swap-oob="outerHTML"><i></i><i></i><i></i></div>"#));
+            html.push_str(&format!(r#"<div id="media-empty" class="media-empty hidden" hx-swap-oob="outerHTML"></div><div id="media-copy" class="media-copy" hx-swap-oob="outerHTML"><p id="media-title" class="value truncate">{}</p><p id="media-artist" class="truncate text-[9px] text-[#a6acb9]">{}</p><div class="media-controls" onclick="event.stopPropagation()"><button onclick="fetch('/media/previous',{{method:'POST'}})" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button>{primary_action}<button onclick="fetch('/media/next',{{method:'POST'}})" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 5l9 7-9 7z"/></svg></button></div></div>"#, escape(&media.title), escape(&media.artists.join(", "))));
             if media.artwork_url.is_some() { html.push_str(&format!(r#"<img id="media-art" src="/artwork?t={}" alt="" hx-swap-oob="outerHTML" onerror="this.hidden=true" onload="this.hidden=false">"#, Instant::now().elapsed().as_nanos())); }
+            html.push_str(&media_fullscreen(&media));
         }
-        _ => html.push_str(r#"<img id="media-art" hidden hx-swap-oob="outerHTML" alt=""><div id="media-empty" class="media-empty" hx-swap-oob="outerHTML" aria-hidden="true"><img src="/assets/arch-logo.png" alt=""></div><div id="media-copy" class="media-copy hidden" hx-swap-oob="outerHTML"></div>"#),
+        _ => html.push_str(r#"<div id="media-ambient" class="media-ambient" hx-swap-oob="outerHTML"></div><img id="media-art" hidden hx-swap-oob="outerHTML" alt=""><div id="media-empty" class="media-empty" hx-swap-oob="outerHTML" aria-hidden="true"><img src="/assets/arch-logo.png" alt=""></div><div id="media-copy" class="media-copy hidden" hx-swap-oob="outerHTML"></div>"#),
     }
     html
 }
@@ -1051,15 +1114,23 @@ fn dashboard_fragment() -> String {
     ));
     match PlayerctlBackend.current() {
         Ok(Some(media)) => {
+            let playing = if media.status == PlaybackStatus::Playing {
+                " playing"
+            } else {
+                ""
+            };
+            let primary_action = media_primary_control(media.status);
+            html.push_str(&format!(r#"<div id="media-ambient" class="media-ambient{playing}" hx-swap-oob="outerHTML"><i></i><i></i><i></i></div>"#));
             replace(&mut html, "media-title", &media.title);
             replace(&mut html, "media-artist", &media.artists.join(", "));
-            html.push_str(r#"<div id="media-empty" class="media-empty hidden" hx-swap-oob="outerHTML"></div><div id="media-copy" class="media-copy" hx-swap-oob="outerHTML"><p id="media-title" class="value truncate"></p><p id="media-artist" class="truncate text-[9px] text-[#a6acb9]"></p><div class="media-controls"><button onclick="fetch('/media/previous',{method:'POST'})" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button><button onclick="fetch('/media/play-pause',{method:'POST'})" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg></button><button onclick="fetch('/media/next',{method:'POST'})" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 5l9 7-9 7z"/></svg></button></div></div>"#);
+            html.push_str(&format!(r#"<div id="media-empty" class="media-empty hidden" hx-swap-oob="outerHTML"></div><div id="media-copy" class="media-copy" hx-swap-oob="outerHTML"><p id="media-title" class="value truncate"></p><p id="media-artist" class="truncate text-[9px] text-[#a6acb9]"></p><div class="media-controls" onclick="event.stopPropagation()"><button onclick="fetch('/media/previous',{{method:'POST'}})" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button>{primary_action}<button onclick="fetch('/media/next',{{method:'POST'}})" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 5l9 7-9 7z"/></svg></button></div></div>"#));
             if media.artwork_url.is_some() {
                 html.push_str(r#"<img id="media-art" src="/artwork" alt="" hx-swap-oob="outerHTML" onerror="this.hidden=true" onload="this.hidden=false">"#);
             }
+            html.push_str(&media_fullscreen(&media));
         }
         _ => {
-            html.push_str(r#"<img id="media-art" hidden hx-swap-oob="outerHTML" alt=""><div id="media-empty" class="media-empty" hx-swap-oob="outerHTML" aria-hidden="true"><img src="/assets/arch-logo.png" alt=""></div><div id="media-copy" class="media-copy hidden" hx-swap-oob="outerHTML"></div>"#);
+            html.push_str(r#"<div id="media-ambient" class="media-ambient" hx-swap-oob="outerHTML"></div><img id="media-art" hidden hx-swap-oob="outerHTML" alt=""><div id="media-empty" class="media-empty" hx-swap-oob="outerHTML" aria-hidden="true"><img src="/assets/arch-logo.png" alt=""></div><div id="media-copy" class="media-copy hidden" hx-swap-oob="outerHTML"></div>"#);
         }
     }
     html.push_str(&cached_fragment(
@@ -1115,6 +1186,7 @@ fn dashboard_fragment() -> String {
     ));
     html.push_str(&agents_fragment());
     html.push_str(&calendar_events_fragment());
+    html.push_str(&spectrum_fragment());
     html.push_str(&cached_fragment(&SYSTEM, Duration::from_secs(3), || {
         let status = SystemStatusBackend.current().ok()?;
         let mut fragment = String::new();
