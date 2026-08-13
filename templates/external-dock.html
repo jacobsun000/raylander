@@ -3,13 +3,13 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Raylander External Dock</title><link rel="stylesheet" href="/assets/external-dock.css">
   <script src="/assets/htmx.min.js"></script><script src="/assets/htmx-ext-ws.js"></script>
-  <script>document.addEventListener("htmx:wsClose",()=>{const retry=()=>fetch("/",{cache:"no-store"}).then(r=>r.ok?location.reload():setTimeout(retry,1000)).catch(()=>setTimeout(retry,1000));setTimeout(retry,1000)},{once:true});</script>
+  <script>const updateClock=()=>{const now=new Date(),time=document.querySelector("#local-time"),date=document.querySelector("#date");if(time)time.textContent=now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:false});if(date)date.textContent=now.toLocaleDateString([],{month:"short",day:"numeric",weekday:"short"})};document.addEventListener("DOMContentLoaded",()=>{updateClock();setInterval(updateClock,1000)});document.addEventListener("htmx:wsClose",()=>{const retry=()=>fetch("/",{cache:"no-store"}).then(r=>r.ok?location.reload():setTimeout(retry,1000)).catch(()=>setTimeout(retry,1000));setTimeout(retry,1000)},{once:true});</script>
 </head>
 <body class="min-h-screen bg-[#0b0c0f] font-sans text-[#f1f2f5] antialiased [color-scheme:dark]">
 <main id="dashboard" class="mx-auto grid min-h-dvh w-full max-w-6xl grid-cols-1 gap-3 p-4 sm:grid-cols-2" hx-ext="ws" ws-connect="/ws">
   <section id="clock-card" class="card relative">
-    <span class="status-dot"></span><p id="date" class="label">{{ initial_date }}</p>
-    <time id="server-time" class="mt-3 block font-mono text-5xl font-medium leading-none tracking-[-.06em] tabular-nums">{{ initial_time }}</time>
+    <span class="status-dot"></span><p id="date" class="label"></p>
+    <time id="local-time" class="mt-3 block font-mono text-5xl font-medium leading-none tracking-[-.06em] tabular-nums"></time>
   </section>
 
   <section id="controls-card" class="card controls-card">
@@ -23,11 +23,11 @@
     <span class="control-icon text-lg" title="Reserved">＋</span>
   </section>
   <section id="packages-card" class="card"><p class="label">Updates</p><p id="packages-total" class="big-number">—</p><div class="chips"><span id="packages-pacman" title="Official packages">◆ —</span><span id="packages-paru" title="AUR packages">▲ —</span></div></section>
-  <section id="focus-card" class="card"><p class="label">Focus</p><p id="window" class="value truncate">Desktop</p><p id="workspace" class="accent-meta">Workspace —</p></section>
+  <section id="focus-card" class="card"><div id="monitors" class="monitor-grid"><div class="monitor-view"><p>Desktop</p><div class="workspace-dots"><i class="active"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div></section>
 
   <section id="media-card" class="card media-card">
     <img id="media-art" src="/artwork" alt="" onerror="this.hidden=true" onload="this.hidden=false">
-    <div class="media-shade"></div><div class="media-copy"><p id="media-title" class="value truncate">Nothing playing</p><p id="media-artist" class="truncate text-[9px] text-[#a6acb9]"></p><div class="media-controls"><button onclick="fetch('/media/previous',{method:'POST'})" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button><button onclick="fetch('/media/play-pause',{method:'POST'})" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg></button><button onclick="fetch('/media/next',{method:'POST'})" aria-label="Next"><svg viewBox="0 0 24 24"><path d="m6 5 9 7-9 7zm10 0h2v14h-2z"/></svg></button></div></div>
+    <div id="media-empty" class="media-empty" aria-hidden="true"><img src="/assets/arch-logo.png" alt=""></div><div class="media-shade"></div><div id="media-copy" class="media-copy hidden"><p id="media-title" class="value truncate">Nothing playing</p><p id="media-artist" class="truncate text-[9px] text-[#a6acb9]"></p><div class="media-controls"><button onclick="fetch('/media/previous',{method:'POST'})" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button><button onclick="fetch('/media/play-pause',{method:'POST'})" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg></button><button onclick="fetch('/media/next',{method:'POST'})" aria-label="Next"><svg viewBox="0 0 24 24"><path d="m6 5 9 7-9 7zm10 0h2v14h-2z"/></svg></button></div></div>
   </section>
 
   <section id="system-card" class="card"><div class="system-grid">

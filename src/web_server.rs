@@ -1,6 +1,8 @@
 use std::{
+    io::{BufRead, BufReader},
     net::SocketAddr,
-    process::Command,
+    os::unix::net::UnixStream,
+    process::{Command, Stdio},
     sync::{Mutex, OnceLock, mpsc},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -15,12 +17,11 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
-use chrono::Local;
 use serde::Deserialize;
-use tokio::sync::oneshot;
+use tokio::sync::{broadcast, oneshot};
 
 use crate::{
-    audio::WpctlBackend,
+    audio::{AudioObserver, WpctlBackend},
     bluetooth::{BluetoothAvailability, BluetoothBackend},
     config::ExternalDockConfig,
     display::DdcutilBackend,
@@ -34,14 +35,13 @@ use crate::{
 const EXTERNAL_DOCK_CSS: &str = include_str!("../assets/web/external-dock.css");
 const HTMX: &str = include_str!("../assets/web/htmx.min.js");
 const HTMX_WS: &str = include_str!("../assets/web/htmx-ext-ws.js");
+const ARCH_LOGO: &[u8] = include_bytes!("../assets/web/arch-logo.png");
 static WEATHER_COORDS: OnceLock<(String, String)> = OnceLock::new();
+static EVENTS: OnceLock<broadcast::Sender<()>> = OnceLock::new();
 
 #[derive(Template)]
 #[template(path = "external-dock.html")]
-struct DockTemplate {
-    initial_date: String,
-    initial_time: String,
-}
+struct DockTemplate;
 
 pub struct WebServer {
     shutdown: Option<oneshot::Sender<()>>,
@@ -103,6 +103,9 @@ fn run(address: SocketAddr, shutdown: oneshot::Receiver<()>, ready: mpsc::SyncSe
                 return;
             }
         };
+        let (events, _) = broadcast::channel(32);
+        let _ = EVENTS.set(events.clone());
+        start_event_sources(events);
         let _ = ready.send(Ok(()));
         if let Err(error) = axum::serve(listener, router())
             .with_graceful_shutdown(async {
@@ -130,15 +133,11 @@ fn router() -> Router {
             "/assets/htmx-ext-ws.js",
             get(|| async { javascript(HTMX_WS) }),
         )
+        .route("/assets/arch-logo.png", get(arch_logo))
 }
 
 async fn index() -> Response {
-    match (DockTemplate {
-        initial_date: server_date(),
-        initial_time: server_time(),
-    })
-    .render()
-    {
+    match DockTemplate.render() {
         Ok(page) => Html(page).into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to render external dock page");
@@ -188,34 +187,128 @@ async fn websocket(upgrade: WebSocketUpgrade) -> impl IntoResponse {
 }
 
 async fn send_time(mut socket: WebSocket) {
-    if socket
-        .send(Message::Text(clock_fragment().into()))
-        .await
-        .is_err()
-    {
-        return;
-    }
+    let Some(events) = EVENTS.get() else { return };
+    let mut events = events.subscribe();
     loop {
+        if events.recv().await.is_err() {
+            break;
+        }
         let fragment = tokio::task::spawn_blocking(dashboard_fragment)
             .await
-            .unwrap_or_else(|_| clock_fragment());
+            .unwrap_or_default();
         if socket.send(Message::Text(fragment.into())).await.is_err() {
             break;
         }
-        tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
 
+fn start_event_sources(events: broadcast::Sender<()>) {
+    let (observer, audio_events) = AudioObserver::start();
+    thread::spawn(move || {
+        let _observer = observer;
+        while audio_events.recv().is_ok() {
+            let _ = events.send(());
+        }
+    });
+    observe_command([
+        "playerctl",
+        "--all-players",
+        "metadata",
+        "--follow",
+        "--format",
+        "{{status}} {{xesam:title}}",
+    ]);
+    observe_input_method();
+    observe_hyprland();
+}
+
+fn observe_command<const N: usize>(command: [&'static str; N]) {
+    thread::spawn(move || {
+        loop {
+            let Some(events) = EVENTS.get() else { return };
+            let Ok(mut child) = Command::new(command[0])
+                .args(&command[1..])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+            else {
+                thread::sleep(Duration::from_secs(5));
+                continue;
+            };
+            if let Some(stdout) = child.stdout.take() {
+                for line in BufReader::new(stdout).lines() {
+                    if line.is_err() {
+                        break;
+                    }
+                    let _ = events.send(());
+                }
+            }
+            let _ = child.wait();
+            thread::sleep(Duration::from_secs(1));
+        }
+    });
+}
+
+fn observe_input_method() {
+    thread::spawn(|| {
+        let mut previous = None;
+        loop {
+            let current = Fcitx5Backend.current().ok();
+            if previous.as_ref() != current.as_ref() {
+                previous = current;
+                if let Some(events) = EVENTS.get() {
+                    let _ = events.send(());
+                }
+            }
+            thread::sleep(Duration::from_millis(500));
+        }
+    });
+}
+
+fn observe_hyprland() {
+    thread::spawn(|| {
+        loop {
+            let Some(signature) = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE") else {
+                thread::sleep(Duration::from_secs(5));
+                continue;
+            };
+            let runtime = std::env::var_os("XDG_RUNTIME_DIR").unwrap_or_else(|| "/tmp".into());
+            let path = std::path::PathBuf::from(runtime)
+                .join("hypr")
+                .join(signature)
+                .join(".socket2.sock");
+            let Ok(stream) = UnixStream::connect(path) else {
+                thread::sleep(Duration::from_secs(2));
+                continue;
+            };
+            for line in BufReader::new(stream).lines() {
+                let Ok(line) = line else { break };
+                if (line.starts_with("activewindow") || line.starts_with("workspace"))
+                    && let Some(events) = EVENTS.get()
+                {
+                    let _ = events.send(());
+                }
+            }
+        }
+    });
+}
+
 #[derive(Deserialize)]
-struct ActiveWindow {
-    title: String,
-    class: String,
-    workspace: Workspace,
+#[serde(rename_all = "camelCase")]
+struct HyprMonitor {
+    id: i32,
+    active_workspace: HyprWorkspaceRef,
 }
 #[derive(Deserialize)]
-struct Workspace {
-    name: String,
+struct HyprWorkspaceRef {
     id: i32,
+}
+#[derive(Deserialize)]
+struct HyprWorkspace {
+    id: i32,
+    windows: u32,
+    #[serde(rename = "lastwindowtitle")]
+    last_window_title: String,
 }
 
 struct FragmentCache {
@@ -255,7 +348,7 @@ fn dashboard_fragment() -> String {
     static LAST_VOLUME: OnceLock<Mutex<Option<u16>>> = OnceLock::new();
     static LAST_BRIGHTNESS: OnceLock<Mutex<Option<u8>>> = OnceLock::new();
 
-    let mut html = clock_fragment();
+    let mut html = String::new();
     if let Ok(volume) = WpctlBackend.current() {
         let percent = if volume.muted {
             0
@@ -271,7 +364,7 @@ fn dashboard_fragment() -> String {
     }
     html.push_str(&cached_fragment(
         &BLUETOOTH,
-        Duration::from_secs(30),
+        Duration::from_millis(400),
         || {
             let state = zbus::block_on(BluetoothBackend.state()).ok()?;
             let bluetooth_class = match state.availability {
@@ -306,11 +399,17 @@ fn dashboard_fragment() -> String {
             Some(fragment)
         },
     ));
-    if let Ok(Some(media)) = PlayerctlBackend.current() {
-        replace(&mut html, "media-title", &media.title);
-        replace(&mut html, "media-artist", &media.artists.join(", "));
-        if media.artwork_url.is_some() {
-            html.push_str(r#"<img id="media-art" src="/artwork" alt="" hx-swap-oob="outerHTML" onerror="this.hidden=true" onload="this.hidden=false">"#);
+    match PlayerctlBackend.current() {
+        Ok(Some(media)) => {
+            replace(&mut html, "media-title", &media.title);
+            replace(&mut html, "media-artist", &media.artists.join(", "));
+            html.push_str(r#"<div id="media-empty" class="media-empty hidden" hx-swap-oob="outerHTML"></div><div id="media-copy" class="media-copy" hx-swap-oob="outerHTML"><p id="media-title" class="value truncate"></p><p id="media-artist" class="truncate text-[9px] text-[#a6acb9]"></p><div class="media-controls"><button onclick="fetch('/media/previous',{method:'POST'})" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button><button onclick="fetch('/media/play-pause',{method:'POST'})" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg></button><button onclick="fetch('/media/next',{method:'POST'})" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 5l9 7-9 7z"/></svg></button></div></div>"#);
+            if media.artwork_url.is_some() {
+                html.push_str(r#"<img id="media-art" src="/artwork" alt="" hx-swap-oob="outerHTML" onerror="this.hidden=true" onload="this.hidden=false">"#);
+            }
+        }
+        _ => {
+            html.push_str(r#"<img id="media-art" hidden hx-swap-oob="outerHTML" alt=""><div id="media-empty" class="media-empty" hx-swap-oob="outerHTML" aria-hidden="true"><img src="/assets/arch-logo.png" alt=""></div><div id="media-copy" class="media-copy hidden" hx-swap-oob="outerHTML"></div>"#);
         }
     }
     html.push_str(&cached_fragment(
@@ -337,22 +436,8 @@ fn dashboard_fragment() -> String {
             Some(fragment)
         },
     ));
-    if let Some(window) = active_window() {
-        replace(
-            &mut html,
-            "window",
-            &if window.title.trim().is_empty() {
-                window.class
-            } else {
-                window.title
-            },
-        );
-        let workspace = if window.workspace.name.is_empty() {
-            window.workspace.id.to_string()
-        } else {
-            window.workspace.name
-        };
-        replace(&mut html, "workspace", &format!("Workspace {workspace}"));
+    if let Some(monitors) = hyprland_fragment() {
+        raw_replace(&mut html, "monitors", &monitors);
     }
     html.push_str(&cached_fragment(&BRIGHTNESS, Duration::from_secs(5 * 60), || {
         let displays = DdcutilBackend.all_brightness().ok()?;
@@ -466,11 +551,29 @@ fn weather_description(code: u8) -> (&'static str, &'static str) {
     }
 }
 
-fn active_window() -> Option<ActiveWindow> {
-    let output = Command::new("hyprctl")
-        .args(["-j", "activewindow"])
-        .output()
-        .ok()?;
+fn hyprland_fragment() -> Option<String> {
+    let monitors: Vec<HyprMonitor> = hyprctl_json("monitors")?;
+    let workspaces: Vec<HyprWorkspace> = hyprctl_json("workspaces")?;
+    Some(monitors.into_iter().map(|monitor| {
+        let base = monitor.id * 9 + 1;
+        let active = monitor.active_workspace.id;
+        let title = workspaces.iter().find(|workspace| workspace.id == active)
+            .map(|workspace| workspace.last_window_title.as_str())
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or("Desktop");
+        let title = if title.to_ascii_lowercase().contains("firefox") { "Firefox" } else { title };
+        let dots = [6, 7, 8, 3, 4, 5, 0, 1, 2].into_iter().map(|offset| {
+            let id = base + offset;
+            let occupied = workspaces.iter().any(|workspace| workspace.id == id && workspace.windows > 0);
+            let class = if id == active { "active" } else if occupied { "occupied" } else { "" };
+            format!(r#"<i class="{class}"></i>"#)
+        }).collect::<String>();
+        format!(r#"<div class="monitor-view"><p title="{}">{}</p><div class="workspace-dots">{dots}</div></div>"#, escape(title), escape(title))
+    }).collect())
+}
+
+fn hyprctl_json<T: for<'de> Deserialize<'de>>(query: &str) -> Option<T> {
+    let output = Command::new("hyprctl").args(["-j", query]).output().ok()?;
     output.status.success().then_some(())?;
     serde_json::from_slice(&output.stdout).ok()
 }
@@ -494,12 +597,6 @@ fn class_replace(html: &mut String, id: &str, class: &str, value: &str) {
         r#"<span id="{id}" class="{class}" hx-swap-oob="outerHTML">{value}</span>"#
     ));
 }
-fn clock_fragment() -> String {
-    let mut html = String::new();
-    replace(&mut html, "date", &server_date());
-    replace(&mut html, "server-time", &server_time());
-    html
-}
 fn escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -513,19 +610,15 @@ fn stylesheet(source: &'static str) -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], source)
 }
 
+async fn arch_logo() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "image/png")], ARCH_LOGO)
+}
+
 fn javascript(source: &'static str) -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         source,
     )
-}
-
-fn server_date() -> String {
-    Local::now().format("%b %-d, %a").to_string()
-}
-
-fn server_time() -> String {
-    Local::now().format("%H:%M").to_string()
 }
 
 #[cfg(test)]
@@ -534,13 +627,8 @@ mod tests {
 
     #[test]
     fn demo_page_contains_htmx_websocket_and_greeting() {
-        let page = DockTemplate {
-            initial_date: "Aug 14, Wed".into(),
-            initial_time: "12:34".into(),
-        }
-        .render()
-        .unwrap();
-        assert!(page.contains("Aug 14, Wed"));
+        let page = DockTemplate.render().unwrap();
+        assert!(page.contains("id=\"local-time\""));
         assert!(page.contains("id=\"system-card\""));
         assert!(page.contains("id=\"weather-card\""));
         assert!(page.contains("/assets/external-dock.css"));
@@ -550,7 +638,7 @@ mod tests {
         assert!(page.contains("ws-connect=\"/ws\""));
         assert!(page.contains("htmx:wsClose"));
         assert!(page.contains("setTimeout(retry,1000)"));
-        assert!(page.contains("12:34"));
+        assert!(page.contains("toLocaleTimeString"));
     }
 
     /// Run with `cargo test component_load_benchmark -- --ignored --nocapture`.
@@ -587,7 +675,7 @@ mod tests {
             (
                 "window",
                 Box::new(|| {
-                    let _ = active_window();
+                    let _ = hyprland_fragment();
                 }),
             ),
             (

@@ -29,10 +29,19 @@
   .media-card { @apply relative p-0; }
   .media-card img { @apply absolute inset-0 size-full object-cover; }
   .media-shade { @apply absolute inset-0 bg-gradient-to-t from-black/95 via-black/25 to-transparent; }
-  .media-copy { @apply absolute inset-x-0 bottom-0 z-10 p-2; }
-  .media-controls { @apply mt-1 flex items-center justify-center gap-3; }
-  .media-controls button { @apply grid size-5 place-items-center rounded-full bg-white/15 text-white; }
-  .media-controls svg { @apply size-2.5 fill-current; }
+  .media-copy { @apply absolute inset-x-0 bottom-0 z-10 p-3 text-center; }
+  .media-empty { @apply absolute inset-0 grid place-items-center; }
+  .media-empty img { @apply static size-40 object-contain; }
+  .media-controls { @apply mt-2 flex items-center justify-center gap-4; }
+  .media-controls button { @apply grid size-8 place-items-center rounded-full bg-white/15 text-white; }
+  .media-controls svg { @apply size-4 fill-current; }
+  .monitor-grid { @apply grid h-full grid-cols-3 gap-2; }
+  .monitor-view { @apply flex min-w-0 flex-col items-center justify-center gap-3 text-center; }
+  .monitor-view p { @apply w-full truncate text-[9px] font-medium; }
+  .workspace-dots { @apply grid grid-cols-3 gap-1.5; }
+  .workspace-dots i { @apply size-1.5 rounded-full border border-white/20; }
+  .workspace-dots i.occupied { @apply border-[#0a7cff]; }
+  .workspace-dots i.active { @apply border-[#0a7cff] bg-[#0a7cff]; }
   .system-grid { @apply grid h-full grid-cols-2 content-center gap-x-5 gap-y-5; }
   .metric-row { @apply flex items-center justify-between text-xs text-[#a6acb9]; }
   .metric-row svg { @apply size-4 fill-current; }
