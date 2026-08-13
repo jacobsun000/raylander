@@ -5,6 +5,7 @@ pub mod calendar;
 mod cli;
 mod config;
 pub mod display;
+mod herdr;
 pub mod input_method;
 pub mod media;
 pub mod network;

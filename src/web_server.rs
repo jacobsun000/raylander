@@ -25,6 +25,7 @@ use crate::{
     bluetooth::{BluetoothAvailability, BluetoothBackend},
     config::ExternalDockConfig,
     display::DdcutilBackend,
+    herdr::{AgentStatus, HerdrBackend},
     input_method::{Fcitx5Backend, InputMethodStatus},
     media::{MediaAction, PlayerctlBackend},
     network::NmcliBackend,
@@ -36,9 +37,18 @@ const EXTERNAL_DOCK_CSS: &str = include_str!("../assets/web/external-dock.css");
 const HTMX: &str = include_str!("../assets/web/htmx.min.js");
 const HTMX_WS: &str = include_str!("../assets/web/htmx-ext-ws.js");
 const ARCH_LOGO: &[u8] = include_bytes!("../assets/web/arch-logo.png");
+const PI_LOGO: &str = include_str!("../assets/web/pi-logo.svg");
 static WEATHER_COORDS: OnceLock<(String, String)> = OnceLock::new();
 static EVENTS: OnceLock<broadcast::Sender<DockEvent>> = OnceLock::new();
 static DOCK_DISPLAY: OnceLock<u32> = OnceLock::new();
+static AGENT_STATE: OnceLock<Mutex<AgentWidgetState>> = OnceLock::new();
+
+#[derive(Default)]
+struct AgentWidgetState {
+    agents: Vec<AgentStatus>,
+    completed: Vec<(String, String)>,
+    completed_at: Option<Instant>,
+}
 
 #[derive(Clone, Copy, Debug)]
 enum DockEvent {
@@ -47,6 +57,7 @@ enum DockEvent {
     InputMethod,
     Hyprland,
     DisplayPower,
+    Agents,
 }
 
 pub(crate) fn notify_display_power() {
@@ -154,6 +165,7 @@ fn router() -> Router {
             get(|| async { javascript(HTMX_WS) }),
         )
         .route("/assets/arch-logo.png", get(arch_logo))
+        .route("/assets/pi-logo.svg", get(pi_logo))
 }
 
 async fn index() -> Response {
@@ -348,6 +360,7 @@ fn start_event_sources(events: broadcast::Sender<DockEvent>) {
     );
     observe_input_method();
     observe_hyprland();
+    observe_agents();
 }
 
 fn observe_command<const N: usize>(event: DockEvent, command: [&'static str; N]) {
@@ -386,6 +399,62 @@ fn observe_input_method() {
                 previous = current;
                 if let Some(events) = EVENTS.get() {
                     let _ = events.send(DockEvent::InputMethod);
+                }
+            }
+            thread::sleep(Duration::from_millis(500));
+        }
+    });
+}
+
+fn observe_agents() {
+    thread::spawn(|| {
+        let mut previous = Vec::<AgentStatus>::new();
+        loop {
+            if let Ok(current) = HerdrBackend.agents()
+                && current != previous
+            {
+                let completed = current
+                    .iter()
+                    .filter(|agent| {
+                        agent.status == "done"
+                            || (agent.status == "idle"
+                                && previous.iter().any(|old| {
+                                    old.workspace == agent.workspace
+                                        && old.pane == agent.pane
+                                        && old.status == "working"
+                                }))
+                    })
+                    .map(|agent| (agent.workspace.clone(), agent.pane.clone()))
+                    .collect::<Vec<_>>();
+                let state = AGENT_STATE.get_or_init(|| Mutex::new(AgentWidgetState::default()));
+                let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
+                state.agents.clone_from(&current);
+                if !completed.is_empty() {
+                    for agent in completed {
+                        if !state.completed.contains(&agent) {
+                            state.completed.push(agent);
+                        }
+                    }
+                    state.completed_at = Some(Instant::now());
+                }
+                previous = current;
+                drop(state);
+                if let Some(events) = EVENTS.get() {
+                    let _ = events.send(DockEvent::Agents);
+                }
+            }
+            if let Some(state) = AGENT_STATE.get() {
+                let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
+                if state
+                    .completed_at
+                    .is_some_and(|at| at.elapsed() >= Duration::from_secs(10))
+                {
+                    state.completed.clear();
+                    state.completed_at = None;
+                    drop(state);
+                    if let Some(events) = EVENTS.get() {
+                        let _ = events.send(DockEvent::Agents);
+                    }
                 }
             }
             thread::sleep(Duration::from_millis(500));
@@ -481,6 +550,7 @@ fn event_fragment(event: DockEvent) -> String {
         DockEvent::InputMethod => input_method_fragment(),
         DockEvent::Hyprland => hyprland_oob_fragment(),
         DockEvent::DisplayPower => display_power_fragment(),
+        DockEvent::Agents => agents_fragment(),
     }
 }
 
@@ -539,6 +609,86 @@ fn media_fragment() -> String {
         _ => html.push_str(r#"<img id="media-art" hidden hx-swap-oob="outerHTML" alt=""><div id="media-empty" class="media-empty" hx-swap-oob="outerHTML" aria-hidden="true"><img src="/assets/arch-logo.png" alt=""></div><div id="media-copy" class="media-copy hidden" hx-swap-oob="outerHTML"></div>"#),
     }
     html
+}
+
+fn agents_fragment() -> String {
+    let state = AGENT_STATE.get_or_init(|| Mutex::new(AgentWidgetState::default()));
+    let state = state.lock().unwrap_or_else(|error| error.into_inner());
+    let blocked = state
+        .agents
+        .iter()
+        .filter(|agent| agent.status == "blocked")
+        .collect::<Vec<_>>();
+    let working = state
+        .agents
+        .iter()
+        .filter(|agent| agent.status == "working")
+        .collect::<Vec<_>>();
+    let mut completed_agents = state.completed.clone();
+    for agent in state.agents.iter().filter(|agent| agent.status == "done") {
+        let item = (agent.workspace.clone(), agent.pane.clone());
+        if !completed_agents.contains(&item) {
+            completed_agents.push(item);
+        }
+    }
+    let completed = state.agents.iter().any(|agent| agent.status == "done")
+        || state
+            .completed_at
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(10));
+    let (class, title, agents): (&str, &str, Vec<(&str, &str, &str)>) = if !blocked.is_empty() {
+        (
+            "card agent-card attention",
+            "Attention needed",
+            blocked
+                .iter()
+                .map(|a| (a.workspace.as_str(), a.pane.as_str(), "blocked"))
+                .collect(),
+        )
+    } else if completed {
+        (
+            "card agent-card completed",
+            "Agent completed",
+            completed_agents
+                .iter()
+                .map(|(w, p)| (w.as_str(), p.as_str(), "done"))
+                .collect(),
+        )
+    } else if !working.is_empty() {
+        (
+            "card agent-card running",
+            "Agents running",
+            working
+                .iter()
+                .map(|a| (a.workspace.as_str(), a.pane.as_str(), "working"))
+                .collect(),
+        )
+    } else {
+        ("card agent-card idle", "Agents idle", Vec::new())
+    };
+    let rows = agents
+        .into_iter()
+        .map(|(workspace, pane, status)| {
+            let indicator = if status == "working" {
+                r#"<svg class="agent-working-icon" viewBox="0 0 24 18" role="img" aria-label="working"><rect x="2" y="7" width="4" height="9" rx="2"/><rect x="10" y="2" width="4" height="14" rx="2"/><rect x="18" y="5" width="4" height="11" rx="2"/></svg>"#
+                    .to_owned()
+            } else {
+                format!(r#"<b class="agent-status {status}" aria-label="{status}"></b>"#)
+            };
+            format!(
+                r#"<div class="agent-row"><span>{} <i>·</i> {}</span>{indicator}</div>"#,
+                escape(workspace),
+                escape(pane)
+            )
+        })
+        .collect::<String>();
+    let idle_logo = if rows.is_empty() && title == "Agents idle" {
+        r#"<div class="agent-idle"><img src="/assets/pi-logo.svg" alt="Pi"></div>"#
+    } else {
+        ""
+    };
+    format!(
+        r#"<section id="agent-card" class="{class}" hx-swap-oob="outerHTML"><div class="agent-list">{rows}{idle_logo}</div></section>"#
+    )
 }
 
 fn dashboard_fragment() -> String {
@@ -665,6 +815,7 @@ fn dashboard_fragment() -> String {
         Duration::from_secs(15 * 60),
         weather_fragment,
     ));
+    html.push_str(&agents_fragment());
     html.push_str(&cached_fragment(&SYSTEM, Duration::from_secs(3), || {
         let status = SystemStatusBackend.current().ok()?;
         let mut fragment = String::new();
@@ -845,6 +996,10 @@ fn escape(value: &str) -> String {
 
 fn stylesheet(source: &'static str) -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], source)
+}
+
+async fn pi_logo() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "image/svg+xml")], PI_LOGO)
 }
 
 async fn arch_logo() -> impl IntoResponse {
