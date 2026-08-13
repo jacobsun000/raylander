@@ -181,6 +181,26 @@
   .agent-card.attention { @apply bg-[#d97706] text-white; animation:agent-alert .45s ease-out; }
   .agent-card.completed { @apply bg-[#238b57] text-white; animation:agent-done-enter .4s cubic-bezier(.2,.8,.2,1) both; }
   .agent-card.running { @apply border-[#315b82] bg-[#182635]; }
+  .agent-card[role="button"] { @apply cursor-pointer; -webkit-tap-highlight-color:transparent; }
+  .agent-dialog { @apply p-4; }
+  .agent-dialog[open] .agent-dialog-content { animation:agent-dialog-enter .28s ease-out both; }
+  .agent-dialog.closing .agent-dialog-content { animation:agent-dialog-exit .24s ease-in both; }
+  .agent-dialog-content { @apply grid h-full grid-cols-[180px_1fr] overflow-hidden rounded-[18px] border border-white/10 bg-[#16181e] shadow-2xl; }
+  .agent-dialog-content aside { @apply grid place-items-center border-r border-white/10 bg-[#111319]; }
+  .agent-dialog-content aside img { @apply size-28; opacity:.85; }
+  .agent-dialog-content > section { @apply grid grid-cols-2 content-center gap-3 overflow-y-auto p-6; }
+  .agent-detail { @apply flex min-h-16 items-center justify-between rounded-xl border border-white/10 bg-[#1d2029] px-4 text-left transition duration-150; }
+  .agent-detail:active { transform:scale(.97); }
+  .agent-detail span { @apply flex items-baseline gap-2; } .agent-detail strong { @apply text-base; } .agent-detail small { @apply font-mono text-sm text-[#a6acb9]; }
+  .agent-detail > b { @apply flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[10px] uppercase; background:rgb(255 255 255 / .1); }
+  .agent-detail.working { @apply border-[#315b82] bg-[#182635]; animation:agent-detail-enter .25s ease-out both; }
+  .agent-detail.working > b { @apply text-[#61a8ff]; }
+  .agent-detail.working > b::before { content:""; @apply block size-3 rounded-full border-2 border-[#61a8ff] border-t-transparent; animation:agent-spin .75s linear infinite; }
+  .agent-detail.blocked { @apply border-[#e8a13a] bg-[#d97706] text-white; animation:agent-alert .45s ease-out; }
+  .agent-detail.blocked > b { @apply text-white; }
+  .agent-detail.done { @apply border-[#22a857] bg-[#238b57] text-white; animation:agent-done-enter .4s ease-out both; }
+  .agent-detail.done > b { @apply text-white; }
+  .agent-detail.done > b::before { content:"✓"; @apply text-xs font-bold; }
   #clock-card { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
   #clock-card .status-dot { right: 12px; top: 12px; }
   #clock-card .label { font-size: 11px; }
@@ -189,6 +209,10 @@
   #system-card { padding: 10px 16px; }
 }
 
+@keyframes agent-spin { to { transform:rotate(360deg); } }
+@keyframes agent-detail-enter { from { opacity:.4; transform:scale(.98); } }
+@keyframes agent-dialog-enter { from { opacity:0; transform:translateY(8px) scale(.97); } }
+@keyframes agent-dialog-exit { to { opacity:0; transform:translateY(8px) scale(.97); } }
 @keyframes agent-state-enter { from { opacity:0; transform:translateY(6px) scale(.99); } }
 @keyframes agent-bars { from { opacity:.35; transform:scaleY(.3); } to { opacity:1; transform:scaleY(1); } }
 @keyframes agent-pulse { 50% { opacity:.35; transform:scale(.75); } }

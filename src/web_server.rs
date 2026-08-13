@@ -46,7 +46,7 @@ static AGENT_STATE: OnceLock<Mutex<AgentWidgetState>> = OnceLock::new();
 #[derive(Default)]
 struct AgentWidgetState {
     agents: Vec<AgentStatus>,
-    completed: Vec<(String, String)>,
+    completed: Vec<AgentStatus>,
     completed_at: Option<Instant>,
 }
 
@@ -153,6 +153,8 @@ fn router() -> Router {
         .route("/media/{action}", post(media_action))
         .route("/volume/{percent}", post(set_volume))
         .route("/brightness/{percent}", post(set_brightness))
+        .route("/agent/focus", post(focus_agent))
+        .route("/agent/focus/{pane_id}", post(focus_agent_by_id))
         .route("/workspace/{id}", post(focus_workspace))
         .route("/weather-details", get(weather_details))
         .route(
@@ -203,6 +205,71 @@ async fn set_volume(axum::extract::Path(percent): axum::extract::Path<u8>) -> St
     .await;
     match result {
         Ok(Ok(status)) if status.success() => StatusCode::NO_CONTENT,
+        _ => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+async fn focus_agent_by_id(
+    axum::extract::Path(pane_id): axum::extract::Path<String>,
+) -> StatusCode {
+    let focus_id = pane_id.clone();
+    match tokio::task::spawn_blocking(move || HerdrBackend.focus(&focus_id)).await {
+        Ok(Ok(())) => {
+            if let Some(state) = AGENT_STATE.get() {
+                let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
+                state.completed.retain(|agent| agent.pane_id != pane_id);
+                if let Some(agent) = state
+                    .agents
+                    .iter_mut()
+                    .find(|agent| agent.pane_id == pane_id && agent.status == "done")
+                {
+                    agent.status = "idle".to_owned();
+                }
+                if state.completed.is_empty()
+                    && !state.agents.iter().any(|agent| agent.status == "done")
+                {
+                    state.completed_at = None;
+                }
+            }
+            if let Some(events) = EVENTS.get() {
+                let _ = events.send(DockEvent::Agents);
+            }
+            StatusCode::NO_CONTENT
+        }
+        _ => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+async fn focus_agent() -> StatusCode {
+    let pane_id = AGENT_STATE.get().and_then(|state| {
+        let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
+        let pane_id = state
+            .agents
+            .iter()
+            .find(|agent| agent.status == "blocked")
+            .or_else(|| state.agents.iter().find(|agent| agent.status == "done"))
+            .or_else(|| state.completed.first())
+            .map(|agent| agent.pane_id.clone())?;
+        state.completed.retain(|agent| agent.pane_id != pane_id);
+        if let Some(agent) = state
+            .agents
+            .iter_mut()
+            .find(|agent| agent.pane_id == pane_id)
+        {
+            agent.status = "idle".to_owned();
+        }
+        Some(pane_id)
+    });
+    let Some(pane_id) = pane_id else {
+        return StatusCode::NO_CONTENT;
+    };
+    match tokio::task::spawn_blocking(move || HerdrBackend.focus(&pane_id)).await {
+        Ok(Ok(())) => {
+            if let Some(events) = EVENTS.get() {
+                let _ = events.send(DockEvent::Agents);
+            }
+            StatusCode::NO_CONTENT
+        }
         _ => StatusCode::SERVICE_UNAVAILABLE,
     }
 }
@@ -424,14 +491,18 @@ fn observe_agents() {
                                         && old.status == "working"
                                 }))
                     })
-                    .map(|agent| (agent.workspace.clone(), agent.pane.clone()))
+                    .cloned()
                     .collect::<Vec<_>>();
                 let state = AGENT_STATE.get_or_init(|| Mutex::new(AgentWidgetState::default()));
                 let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
                 state.agents.clone_from(&current);
                 if !completed.is_empty() {
                     for agent in completed {
-                        if !state.completed.contains(&agent) {
+                        if !state
+                            .completed
+                            .iter()
+                            .any(|completed| completed.pane_id == agent.pane_id)
+                        {
                             state.completed.push(agent);
                         }
                     }
@@ -626,15 +697,18 @@ fn agents_fragment() -> String {
         .collect::<Vec<_>>();
     let mut completed_agents = state.completed.clone();
     for agent in state.agents.iter().filter(|agent| agent.status == "done") {
-        let item = (agent.workspace.clone(), agent.pane.clone());
-        if !completed_agents.contains(&item) {
-            completed_agents.push(item);
+        if !completed_agents
+            .iter()
+            .any(|item| item.pane_id == agent.pane_id)
+        {
+            completed_agents.push(agent.clone());
         }
     }
-    let completed = state.agents.iter().any(|agent| agent.status == "done")
-        || state
-            .completed_at
-            .is_some_and(|at| at.elapsed() < Duration::from_secs(10));
+    let completed = !completed_agents.is_empty()
+        && (state.agents.iter().any(|agent| agent.status == "done")
+            || state
+                .completed_at
+                .is_some_and(|at| at.elapsed() < Duration::from_secs(10)));
     let (class, title, agents): (&str, &str, Vec<(&str, &str, &str)>) = if !blocked.is_empty() {
         (
             "card agent-card attention",
@@ -650,7 +724,7 @@ fn agents_fragment() -> String {
             "Agent completed",
             completed_agents
                 .iter()
-                .map(|(w, p)| (w.as_str(), p.as_str(), "done"))
+                .map(|agent| (agent.workspace.as_str(), agent.pane.as_str(), "done"))
                 .collect(),
         )
     } else if !working.is_empty() {
@@ -686,8 +760,26 @@ fn agents_fragment() -> String {
     } else {
         ""
     };
+    let action = if !blocked.is_empty() || completed {
+        r#" onclick="fetch('/agent/focus',{method:'POST'})" role="button""#
+    } else {
+        r#" onclick="openAgents()" role="button""#
+    };
+    let all_agents = state
+        .agents
+        .iter()
+        .map(|agent| {
+            let status = escape(&agent.status);
+            format!(
+                r#"<button class="agent-detail {status}" onclick="focusAgent('{}')"><span><strong>{}</strong><small>· {}</small></span><b>{status}</b></button>"#,
+                escape(&agent.pane_id),
+                escape(&agent.workspace),
+                escape(&agent.pane)
+            )
+        })
+        .collect::<String>();
     format!(
-        r#"<section id="agent-card" class="{class}" hx-swap-oob="outerHTML"><div class="agent-list">{rows}{idle_logo}</div></section>"#
+        r#"<section id="agent-card" class="{class}"{action} hx-swap-oob="outerHTML"><div class="agent-list">{rows}{idle_logo}</div></section><div id="agent-dialog-content" class="agent-dialog-content" hx-swap-oob="outerHTML"><aside><img src="/assets/pi-logo.svg" alt="Pi"></aside><section>{all_agents}</section></div>"#
     )
 }
 

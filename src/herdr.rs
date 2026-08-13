@@ -7,6 +7,7 @@ use serde::Deserialize;
 pub struct AgentStatus {
     pub workspace: String,
     pub pane: String,
+    pub pane_id: String,
     pub status: String,
 }
 
@@ -63,11 +64,23 @@ impl HerdrBackend {
                     .pane_id
                     .rsplit_once(":p")
                     .map_or(agent.pane_id.clone(), |(_, pane)| pane.to_owned()),
+                pane_id: agent.pane_id,
                 status: agent.agent_status,
             })
             .collect::<Vec<_>>();
         agents.sort_by(|a, b| (&a.workspace, &a.pane).cmp(&(&b.workspace, &b.pane)));
         Ok(agents)
+    }
+
+    pub fn focus(&self, pane_id: &str) -> Result<()> {
+        let output = Command::new("herdr")
+            .args(["agent", "focus", pane_id])
+            .output()
+            .context("failed to execute herdr")?;
+        if !output.status.success() {
+            bail!("herdr agent focus failed");
+        }
+        Ok(())
     }
 }
 
