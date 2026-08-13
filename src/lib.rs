@@ -18,5 +18,6 @@ mod theme;
 pub mod tray;
 pub mod tray_service;
 mod volume_osd;
+mod web_server;
 
 pub use app::run;

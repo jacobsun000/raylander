@@ -1,5 +1,5 @@
 theme = "theme.css"
-color-scheme = "system" # system, light, or dark
+color-scheme = "system"     # system, light, or dark
 reduce-transparency = false
 
 [components.volume-osd]
@@ -32,7 +32,13 @@ right = [
 [components.sidebar]
 enabled = true
 monitor = "focused"
-sections = ["quick-settings", "playing", "calendar", "packages", "notifications"]
+sections = [
+  "quick-settings",
+  "playing",
+  "calendar",
+  "packages",
+  "notifications",
+]
 
 [components.desktop]
 enabled = true
@@ -68,3 +74,8 @@ row = 1
 [components.notifications]
 enabled = true
 history-limit = 100
+
+[components.external-dock]
+enabled = true
+bind-address = "0.0.0.0"
+port = 8030

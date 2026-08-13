@@ -50,6 +50,16 @@ raylander reload
 raylander quit
 ```
 
+While the daemon is running, the external dock demo is available at
+`http://HOST-IP:8030`. It displays “Hello World” and a clock streamed from the
+server over a WebSocket. The default `0.0.0.0` bind address makes it reachable
+from phones on the same network; do not expose this unauthenticated HTTP service
+to the public internet. Configure or disable it under `[components.external-dock]`.
+Because Raylander is single-instance, running `cargo run -- daemon` while a daemon
+is active contacts the existing process rather than replacing it. Apply config
+changes with `cargo run -- reload`; after rebuilding code, restart with
+`cargo run -- quit` followed by `cargo run -- daemon`.
+
 For UI development, use `cargo run -- preview`: it runs the just-compiled code in
 a separate local process and does not contact or stop an older daemon. The
 duration accepts human-friendly values such as `500ms`, `5s`, or `2m` and

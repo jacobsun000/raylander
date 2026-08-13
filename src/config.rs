@@ -1,4 +1,4 @@
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, net::IpAddr, path::PathBuf};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -29,6 +29,7 @@ pub struct ComponentsConfig {
     pub sidebar: SidebarConfig,
     pub desktop: DesktopConfig,
     pub notifications: NotificationsConfig,
+    pub external_dock: ExternalDockConfig,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -61,6 +62,14 @@ pub struct DesktopConfig {
 pub struct NotificationsConfig {
     pub enabled: bool,
     pub history_limit: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct ExternalDockConfig {
+    pub enabled: bool,
+    pub bind_address: IpAddr,
+    pub port: u16,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -271,6 +280,16 @@ impl Default for NotificationsConfig {
     }
 }
 
+impl Default for ExternalDockConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bind_address: "0.0.0.0".parse().expect("valid default address"),
+            port: 8_030,
+        }
+    }
+}
+
 impl Default for DesktopWidgetConfig {
     fn default() -> Self {
         Self::new(ComponentId::Clock, GridSize::OneByOne, 0, 0)
@@ -357,6 +376,10 @@ fn validate(config: &Config) -> Result<()> {
         config.components.notifications.history_limit <= 1_000,
         "notification history-limit must not exceed 1000"
     );
+    anyhow::ensure!(
+        config.components.external_dock.port > 0,
+        "external-dock port must be greater than zero"
+    );
     validate_desktop_layout(&config.components.desktop.widgets)?;
     Ok(())
 }
@@ -397,6 +420,8 @@ mod tests {
         assert_eq!(config.components.volume_osd.monitor, "DP-2");
         assert_eq!(config.components.volume_osd.step_percent, 1);
         assert!(config.components.volume_osd.observe_external);
+        assert!(config.components.external_dock.enabled);
+        assert_eq!(config.components.external_dock.port, 8_030);
     }
 
     #[test]
@@ -413,6 +438,24 @@ mod tests {
         assert_eq!(config.components.volume_osd.timeout_ms, 900);
         assert_eq!(config.components.volume_osd.step_percent, 1);
         assert_eq!(config.color_scheme, ColorScheme::System);
+    }
+
+    #[test]
+    fn parses_external_dock_config() {
+        let config: Config = toml::from_str(
+            r#"
+                [components.external-dock]
+                enabled = true
+                bind-address = "127.0.0.1"
+                port = 8080
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.components.external_dock.bind_address,
+            "127.0.0.1".parse::<IpAddr>().unwrap()
+        );
+        assert_eq!(config.components.external_dock.port, 8080);
     }
 
     #[test]

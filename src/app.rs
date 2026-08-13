@@ -27,6 +27,7 @@ use crate::{
     tray::{TrayEvent, TrayState},
     tray_service::TrayService,
     volume_osd::VolumeOsd,
+    web_server::WebServer,
 };
 
 const APP_ID: &str = "io.raylander.Raylander";
@@ -174,6 +175,7 @@ struct Runtime {
     observer: Option<AudioObserver>,
     observer_events: Option<Receiver<()>>,
     last_state: Option<VolumeState>,
+    web_server: Option<WebServer>,
 }
 
 impl Runtime {
@@ -222,6 +224,17 @@ impl Runtime {
         } else {
             (None, None)
         };
+        let web_server = if config.components.external_dock.enabled {
+            match WebServer::start(&config.components.external_dock) {
+                Ok(server) => Some(server),
+                Err(error) => {
+                    tracing::warn!(%error, "external dock server unavailable");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         Rc::new(RefCell::new(Self {
             _hold: hold,
             app: app.clone(),
@@ -242,6 +255,7 @@ impl Runtime {
             observer,
             observer_events,
             last_state,
+            web_server,
         }))
     }
 
@@ -533,6 +547,22 @@ impl Runtime {
                 NotificationCenter::new(new_config.components.notifications.history_limit);
             center.restore_history(history);
             self.notifications = center;
+        }
+        if new_config.components.external_dock != self.config.components.external_dock {
+            self.web_server = None;
+            if new_config.components.external_dock.enabled {
+                match WebServer::start(&new_config.components.external_dock) {
+                    Ok(server) => self.web_server = Some(server),
+                    Err(error) => {
+                        tracing::warn!(%error, "external dock server remains unavailable")
+                    }
+                }
+            }
+        } else if new_config.components.external_dock.enabled && self.web_server.is_none() {
+            match WebServer::start(&new_config.components.external_dock) {
+                Ok(server) => self.web_server = Some(server),
+                Err(error) => tracing::warn!(%error, "external dock server remains unavailable"),
+            }
         }
         if !new_config.components.notifications.enabled {
             self.notification_events = None;
