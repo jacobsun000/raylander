@@ -60,6 +60,17 @@ is active contacts the existing process rather than replacing it. Apply config
 changes with `cargo run -- reload`; after rebuilding code, restart with
 `cargo run -- quit` followed by `cargo run -- daemon`.
 
+For development hot reload, install `cargo-watch` and run the development script:
+
+```sh
+cargo install cargo-watch
+./scripts/dev.sh
+```
+
+It watches Rust sources, templates, embedded assets, and Cargo manifests, then
+rebuilds and restarts Raylander after changes. When the dock WebSocket disconnects,
+the page checks once per second and reloads as soon as the rebuilt server is ready.
+
 For UI development, use `cargo run -- preview`: it runs the just-compiled code in
 a separate local process and does not contact or stop an older daemon. The
 duration accepts human-friendly values such as `500ms`, `5s`, or `2m` and

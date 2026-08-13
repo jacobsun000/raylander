@@ -6,6 +6,16 @@
   <title>Raylander External Dock</title>
   <script src="/assets/htmx.min.js"></script>
   <script src="/assets/htmx-ext-ws.js"></script>
+  <script>
+    document.addEventListener("htmx:wsClose", () => {
+      const reloadWhenReady = () => {
+        fetch("/", { cache: "no-store" })
+          .then(response => response.ok ? location.reload() : setTimeout(reloadWhenReady, 1000))
+          .catch(() => setTimeout(reloadWhenReady, 1000));
+      };
+      setTimeout(reloadWhenReady, 1000);
+    }, { once: true });
+  </script>
   <style>
     :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
     body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #0b0c0f; color: #f1f2f5; }

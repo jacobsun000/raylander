@@ -163,6 +163,8 @@ mod tests {
         assert!(page.contains("Hello World"));
         assert!(page.contains("hx-ext=\"ws\""));
         assert!(page.contains("ws-connect=\"/ws\""));
+        assert!(page.contains("htmx:wsClose"));
+        assert!(page.contains("setTimeout(reloadWhenReady, 1000)"));
         assert!(page.contains("12:34:56"));
     }
 
