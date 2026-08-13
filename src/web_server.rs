@@ -17,12 +17,14 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
+use chrono::{Datelike, Local, Timelike};
 use serde::Deserialize;
 use tokio::sync::{broadcast, oneshot};
 
 use crate::{
     audio::{AudioObserver, WpctlBackend},
     bluetooth::{BluetoothAvailability, BluetoothBackend},
+    calendar_events::{CalendarEvent, GoogleCalendarBackend},
     config::ExternalDockConfig,
     display::DdcutilBackend,
     herdr::{AgentStatus, HerdrBackend},
@@ -38,10 +40,13 @@ const HTMX: &str = include_str!("../assets/web/htmx.min.js");
 const HTMX_WS: &str = include_str!("../assets/web/htmx-ext-ws.js");
 const ARCH_LOGO: &[u8] = include_bytes!("../assets/web/arch-logo.png");
 const PI_LOGO: &str = include_str!("../assets/web/pi-logo.svg");
+const TODO_ICON: &str = include_str!("../assets/web/todo.svg");
 static WEATHER_COORDS: OnceLock<(String, String)> = OnceLock::new();
 static EVENTS: OnceLock<broadcast::Sender<DockEvent>> = OnceLock::new();
 static DOCK_DISPLAY: OnceLock<u32> = OnceLock::new();
 static AGENT_STATE: OnceLock<Mutex<AgentWidgetState>> = OnceLock::new();
+static CALENDAR_URLS: OnceLock<Vec<String>> = OnceLock::new();
+static CALENDAR_EVENTS: OnceLock<Mutex<Vec<CalendarEvent>>> = OnceLock::new();
 
 #[derive(Default)]
 struct AgentWidgetState {
@@ -58,6 +63,7 @@ enum DockEvent {
     Hyprland,
     DisplayPower,
     Agents,
+    Calendar,
 }
 
 pub(crate) fn notify_display_power() {
@@ -82,6 +88,7 @@ impl WebServer {
             config.weather_latitude.clone(),
             config.weather_longitude.clone(),
         ));
+        let _ = CALENDAR_URLS.set(config.google_calendar_urls.clone());
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let thread = thread::Builder::new()
@@ -168,6 +175,7 @@ fn router() -> Router {
         )
         .route("/assets/arch-logo.png", get(arch_logo))
         .route("/assets/pi-logo.svg", get(pi_logo))
+        .route("/assets/todo.svg", get(todo_icon))
 }
 
 async fn index() -> Response {
@@ -428,6 +436,27 @@ fn start_event_sources(events: broadcast::Sender<DockEvent>) {
     observe_input_method();
     observe_hyprland();
     observe_agents();
+    observe_calendar();
+}
+
+fn observe_calendar() {
+    thread::spawn(|| {
+        loop {
+            let urls = CALENDAR_URLS.get().cloned().unwrap_or_default();
+            if let Ok(events) = GoogleCalendarBackend.events(&urls) {
+                let state = CALENDAR_EVENTS.get_or_init(|| Mutex::new(Vec::new()));
+                let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
+                if *state != events {
+                    *state = events;
+                    drop(state);
+                    if let Some(sender) = EVENTS.get() {
+                        let _ = sender.send(DockEvent::Calendar);
+                    }
+                }
+            }
+            thread::sleep(Duration::from_secs(5 * 60));
+        }
+    });
 }
 
 fn observe_command<const N: usize>(event: DockEvent, command: [&'static str; N]) {
@@ -622,6 +651,7 @@ fn event_fragment(event: DockEvent) -> String {
         DockEvent::Hyprland => hyprland_oob_fragment(),
         DockEvent::DisplayPower => display_power_fragment(),
         DockEvent::Agents => agents_fragment(),
+        DockEvent::Calendar => calendar_events_fragment(),
     }
 }
 
@@ -680,6 +710,64 @@ fn media_fragment() -> String {
         _ => html.push_str(r#"<img id="media-art" hidden hx-swap-oob="outerHTML" alt=""><div id="media-empty" class="media-empty" hx-swap-oob="outerHTML" aria-hidden="true"><img src="/assets/arch-logo.png" alt=""></div><div id="media-copy" class="media-copy hidden" hx-swap-oob="outerHTML"></div>"#),
     }
     html
+}
+
+fn calendar_events_fragment() -> String {
+    let state = CALENDAR_EVENTS.get_or_init(|| Mutex::new(Vec::new()));
+    let events = state.lock().unwrap_or_else(|error| error.into_inner());
+    let today = Local::now().date_naive();
+    let upcoming = events
+        .iter()
+        .filter(|event| event.start.date_naive() >= today)
+        .collect::<Vec<_>>();
+    let compact = upcoming
+        .iter()
+        .filter(|event| event.start.date_naive() <= today.succ_opt().unwrap_or(today))
+        .map(|event| format!(r#"<div class="calendar-event-mini"><i></i><span><b>{}</b><small>{}</small></span></div>"#, escape(&event.title), event_time(event)))
+        .collect::<String>();
+    let details = upcoming
+        .iter()
+        .map(|event| {
+            let action = if event.url.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    r#" onclick="window.open('{}','_blank')" role="link""#,
+                    escape(&event.url)
+                )
+            };
+            format!(r#"<article class="calendar-event-detail"{action}><time><b>{}</b><small>{}</small></time><div><strong>{}</strong><span>{}</span></div></article>"#, event.start.format("%a"), event_time(event), escape(&event.title), escape(&event.location))
+        })
+        .collect::<String>();
+    let empty = if compact.is_empty() {
+        r#"<div class="calendar-empty"><img src="/assets/todo.svg" alt="No upcoming events"><span>No upcoming events</span></div>"#
+    } else {
+        ""
+    };
+    let empty_class = if compact.is_empty() { " empty" } else { "" };
+    format!(
+        r#"<section id="calendar-events-card" class="card calendar-events-card{empty_class}" onclick="if(this.dataset.scrolled){{delete this.dataset.scrolled}}else{{document.querySelector('#calendar-events-dialog').showModal()}}" role="button" hx-swap-oob="outerHTML"><div onscroll="this.parentElement.dataset.scrolled='1'">{compact}{empty}</div></section><div id="calendar-events-panel" class="calendar-events-panel" hx-swap-oob="outerHTML"><header><span><b>{}</b><small>{}</small></span><h2>Upcoming</h2></header><main class="{empty_class}">{details}{empty}</main></div>"#,
+        Local::now().day(),
+        Local::now().format("%b")
+    )
+}
+
+fn event_time(event: &CalendarEvent) -> String {
+    if event.all_day {
+        "All day".into()
+    } else {
+        let hour = event.start.hour();
+        let suffix = if hour < 12 { "AM" } else { "PM" };
+        format!(
+            "{}:{:02} {suffix}",
+            if hour.is_multiple_of(12) {
+                12
+            } else {
+                hour % 12
+            },
+            event.start.minute()
+        )
+    }
 }
 
 fn agents_fragment() -> String {
@@ -908,6 +996,7 @@ fn dashboard_fragment() -> String {
         weather_fragment,
     ));
     html.push_str(&agents_fragment());
+    html.push_str(&calendar_events_fragment());
     html.push_str(&cached_fragment(&SYSTEM, Duration::from_secs(3), || {
         let status = SystemStatusBackend.current().ok()?;
         let mut fragment = String::new();
@@ -1092,6 +1181,10 @@ fn stylesheet(source: &'static str) -> impl IntoResponse {
 
 async fn pi_logo() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "image/svg+xml")], PI_LOGO)
+}
+
+async fn todo_icon() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "image/svg+xml")], TODO_ICON)
 }
 
 async fn arch_logo() -> impl IntoResponse {

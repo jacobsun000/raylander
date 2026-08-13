@@ -165,7 +165,48 @@
   #clock-card{grid-area:clock} #controls-card{grid-area:controls} #bluetooth-card{grid-area:bluetooth}
   #packages-card{grid-area:packages} #focus-card{grid-area:focus} #media-card{grid-area:media}
   #system-card{grid-area:system} #weather-card{grid-area:placeholder1} #agent-card{grid-area:placeholder2}
-  #placeholder-card-3{grid-area:placeholder3} #placeholder-card-4{grid-area:placeholder4}
+  #calendar-events-card{grid-area:placeholder3} #placeholder-card-4{grid-area:placeholder4}
+  .calendar-events-card { @apply cursor-pointer overflow-hidden; }
+  .calendar-events-card > div { @apply grid h-full content-start gap-1 overflow-y-auto overscroll-contain; scrollbar-width:none; touch-action:pan-y; }
+  .calendar-events-card.empty > div { @apply place-items-center content-center; }
+  .calendar-events-card > div::-webkit-scrollbar { display:none; }
+  .calendar-event-mini { @apply flex min-w-0 shrink-0 items-center gap-2; animation:calendar-event-enter .28s ease-out both; }
+  .calendar-event-mini:nth-child(2) { animation-delay:40ms; }
+  .calendar-event-mini:nth-child(3) { animation-delay:80ms; }
+  .calendar-event-mini:nth-child(4) { animation-delay:120ms; }
+  .calendar-event-mini > i { @apply h-7 w-[3px] shrink-0 rounded-full bg-[#0a7cff]; }
+  .calendar-event-mini span { @apply flex min-w-0 flex-col; }
+  .calendar-event-mini b { @apply truncate text-[10px] font-semibold; }
+  .calendar-event-mini small { @apply font-mono text-[8px] text-[#a6acb9]; }
+  .calendar-empty { @apply flex h-full items-center justify-center; }
+  .calendar-empty img { @apply size-12 object-contain; }
+  .calendar-empty span { @apply hidden; }
+  .calendar-events-panel .calendar-empty { @apply min-h-48 gap-3 text-xs text-[#a6acb9]; }
+  .calendar-events-panel .calendar-empty img { @apply size-24; }
+  .calendar-events-dialog[open] .calendar-events-panel { animation:agent-dialog-enter .25s ease-out both; }
+  .calendar-events-dialog.closing .calendar-events-panel { animation:agent-dialog-exit .24s ease-in both; }
+  .calendar-events-panel { @apply grid h-full grid-cols-[150px_1fr] overflow-hidden rounded-[18px] border border-white/10 bg-[#16181e] shadow-2xl; }
+  .calendar-events-panel > header { @apply flex flex-col justify-between border-r border-white/10 bg-[#111319] p-6; }
+  .calendar-events-panel header span { @apply flex flex-col; }
+  .calendar-events-panel header b { @apply text-5xl font-semibold; }
+  .calendar-events-panel header small { @apply font-mono text-xs uppercase text-[#a6acb9]; }
+  .calendar-events-panel h2 { @apply text-xl font-semibold; }
+  .calendar-events-panel main { @apply grid content-start gap-2 overflow-y-auto overscroll-contain p-5; scrollbar-width:none; touch-action:pan-y; }
+  .calendar-events-panel main::-webkit-scrollbar { display:none; }
+  .calendar-events-panel main.empty { @apply place-items-center content-center; }
+  .calendar-event-detail { @apply grid min-h-12 shrink-0 grid-cols-[72px_1fr] items-center rounded-xl border border-white/10 bg-[#1d2029] px-4; animation:calendar-event-enter .3s ease-out both; }
+  .calendar-event-detail[role="link"] { @apply cursor-pointer transition duration-150; }
+  .calendar-event-detail[role="link"]:active { transform:scale(.98); }
+  .calendar-event-detail:nth-child(2) { animation-delay:45ms; }
+  .calendar-event-detail:nth-child(3) { animation-delay:90ms; }
+  .calendar-event-detail:nth-child(4) { animation-delay:135ms; }
+  .calendar-event-detail:nth-child(5) { animation-delay:180ms; }
+  .calendar-event-detail time { @apply flex flex-col font-mono; }
+  .calendar-event-detail time b { @apply text-xs uppercase text-[#0a7cff]; }
+  .calendar-event-detail time small { @apply text-[10px] text-[#a6acb9]; }
+  .calendar-event-detail div { @apply flex min-w-0 flex-col; }
+  .calendar-event-detail strong { @apply truncate text-sm; }
+  .calendar-event-detail span { @apply truncate text-[10px] text-[#a6acb9]; }
   .agent-card { @apply flex flex-col justify-center overflow-hidden transition-colors duration-300; animation:agent-state-enter .25s ease-out both; }
   .agent-list { @apply grid h-full min-h-0 grid-flow-col grid-rows-2 gap-x-7 gap-y-1 overflow-hidden; }
   .agent-row { @apply flex min-w-28 items-center justify-between gap-4 font-mono text-sm font-medium; }
@@ -209,6 +250,7 @@
   #system-card { padding: 10px 16px; }
 }
 
+@keyframes calendar-event-enter { from { opacity:0; transform:translateY(6px) scale(.985); } }
 @keyframes agent-spin { to { transform:rotate(360deg); } }
 @keyframes agent-detail-enter { from { opacity:.4; transform:scale(.98); } }
 @keyframes agent-dialog-enter { from { opacity:0; transform:translateY(8px) scale(.97); } }

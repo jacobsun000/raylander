@@ -2,6 +2,7 @@ mod app;
 mod audio;
 pub mod bluetooth;
 pub mod calendar;
+mod calendar_events;
 mod cli;
 mod config;
 pub mod display;

@@ -72,6 +72,7 @@ pub struct ExternalDockConfig {
     pub port: u16,
     pub weather_latitude: String,
     pub weather_longitude: String,
+    pub google_calendar_urls: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -290,6 +291,7 @@ impl Default for ExternalDockConfig {
             port: 8_030,
             weather_latitude: "30.2672".into(),
             weather_longitude: "-97.7431".into(),
+            google_calendar_urls: Vec::new(),
         }
     }
 }
