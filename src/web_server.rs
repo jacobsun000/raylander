@@ -38,6 +38,7 @@ const HTMX_WS: &str = include_str!("../assets/web/htmx-ext-ws.js");
 const ARCH_LOGO: &[u8] = include_bytes!("../assets/web/arch-logo.png");
 static WEATHER_COORDS: OnceLock<(String, String)> = OnceLock::new();
 static EVENTS: OnceLock<broadcast::Sender<DockEvent>> = OnceLock::new();
+static DOCK_DISPLAY: OnceLock<u32> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug)]
 enum DockEvent {
@@ -140,6 +141,7 @@ fn router() -> Router {
         .route("/artwork", get(artwork))
         .route("/media/{action}", post(media_action))
         .route("/volume/{percent}", post(set_volume))
+        .route("/brightness/{percent}", post(set_brightness))
         .route("/workspace/{id}", post(focus_workspace))
         .route("/weather-details", get(weather_details))
         .route(
@@ -189,6 +191,33 @@ async fn set_volume(axum::extract::Path(percent): axum::extract::Path<u8>) -> St
     .await;
     match result {
         Ok(Ok(status)) if status.success() => StatusCode::NO_CONTENT,
+        _ => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+async fn set_brightness(axum::extract::Path(percent): axum::extract::Path<u8>) -> StatusCode {
+    if percent > 100 {
+        return StatusCode::BAD_REQUEST;
+    }
+    let result = tokio::task::spawn_blocking(move || {
+        let display = DOCK_DISPLAY.get().copied().or_else(|| {
+            DdcutilBackend
+                .displays()
+                .ok()?
+                .into_iter()
+                .find(|display| {
+                    display
+                        .connector
+                        .as_deref()
+                        .is_some_and(|connector| connector.ends_with("DP-2"))
+                })
+                .map(|display| *DOCK_DISPLAY.get_or_init(|| display.number))
+        });
+        display.map(|display| DdcutilBackend.set_brightness(display, percent))
+    })
+    .await;
+    match result {
+        Ok(Some(Ok(()))) => StatusCode::NO_CONTENT,
         _ => StatusCode::SERVICE_UNAVAILABLE,
     }
 }
@@ -614,12 +643,13 @@ fn dashboard_fragment() -> String {
     }
     html.push_str(&cached_fragment(&BRIGHTNESS, Duration::from_secs(5 * 60), || {
         let displays = DdcutilBackend.all_brightness().ok()?;
-        let (_, value) = displays.into_iter().find(|(display, _)| {
+        let (display, value) = displays.into_iter().find(|(display, _)| {
             display
                 .connector
                 .as_deref()
                 .is_some_and(|connector| connector.ends_with("DP-2"))
         })?;
+        let _ = DOCK_DISPLAY.set(display.number);
         let percent = value.percent();
         let mut fragment = String::new();
         if value_changed(&LAST_BRIGHTNESS, percent) {

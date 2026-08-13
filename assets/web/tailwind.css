@@ -58,7 +58,9 @@
   .volume-dialog:focus, .volume-dialog *:focus { outline: none; }
   .volume-dialog-panel { @apply flex h-[340px] w-[210px] flex-col items-center gap-4 rounded-[30px] border border-white/15 bg-[#16181e] p-5 shadow-2xl; }
   .volume-dialog[open] .volume-dialog-panel { animation: volume-enter .3s cubic-bezier(.2,.8,.2,1) both; }
-  .volume-dialog-panel > p { @apply text-sm font-semibold; }
+  .dual-control-panel { @apply h-[340px] w-[310px] flex-row justify-center gap-7; }
+  .dual-control-panel > div { @apply flex flex-col items-center gap-3; }
+  .volume-dialog-panel p { @apply text-sm font-semibold; }
   .volume-dialog-gauge { @apply max-h-none min-h-0 w-28 flex-none cursor-default touch-none; height: 260px; -webkit-tap-highlight-color: transparent; user-select: none; }
   .volume-dialog-gauge .gauge-content { @apply gap-3 text-xl; }
   .volume-dialog-gauge .gauge-content svg { @apply size-10; }
