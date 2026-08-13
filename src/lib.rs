@@ -10,6 +10,7 @@ pub mod display;
 mod herdr;
 pub mod input_method;
 pub mod media;
+mod native_observers;
 pub mod network;
 pub mod notification_service;
 pub mod notifications;

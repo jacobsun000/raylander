@@ -1,14 +1,4 @@
-use std::{
-    io::{BufRead, BufReader},
-    process::{Child, Command, Stdio},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver},
-    },
-    thread::{self, JoinHandle},
-    time::Duration,
-};
+use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
@@ -110,117 +100,6 @@ pub fn parse_wpctl_volume(output: &str) -> Result<VolumeState> {
     })
 }
 
-pub fn is_relevant_subscription_event(line: &str) -> bool {
-    let changed = line.contains("Event 'change'") || line.contains("Event 'new'");
-    changed && (line.contains(" on sink #") || line.contains(" on server"))
-}
-
-pub struct AudioObserver {
-    stop: Arc<AtomicBool>,
-    child: Arc<Mutex<Option<Child>>>,
-    thread: Option<JoinHandle<()>>,
-}
-
-impl AudioObserver {
-    pub fn start() -> (Self, Receiver<()>) {
-        let (sender, receiver) = mpsc::channel();
-        let stop = Arc::new(AtomicBool::new(false));
-        let child = Arc::new(Mutex::new(None));
-        let thread_stop = Arc::clone(&stop);
-        let thread_child = Arc::clone(&child);
-
-        let handle = thread::spawn(move || {
-            let delays = [1_u64, 2, 5, 10, 30];
-            let mut attempts = 0_usize;
-            while !thread_stop.load(Ordering::Relaxed) {
-                let spawned = Command::new("pactl")
-                    .arg("subscribe")
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::null())
-                    .spawn();
-                let mut process = match spawned {
-                    Ok(process) => process,
-                    Err(error) => {
-                        tracing::warn!(%error, "failed to start pactl observer");
-                        sleep_interruptibly(&thread_stop, delays[attempts.min(delays.len() - 1)]);
-                        attempts += 1;
-                        continue;
-                    }
-                };
-                let stdout = process.stdout.take();
-                *thread_child.lock().expect("observer child mutex poisoned") = Some(process);
-                if let Some(stdout) = stdout {
-                    for line in BufReader::new(stdout).lines() {
-                        if thread_stop.load(Ordering::Relaxed) {
-                            break;
-                        }
-                        match line {
-                            Ok(line) if is_relevant_subscription_event(&line) => {
-                                if sender.send(()).is_err() {
-                                    return;
-                                }
-                            }
-                            Ok(_) => {}
-                            Err(error) => {
-                                tracing::warn!(%error, "failed reading pactl observer output");
-                                break;
-                            }
-                        }
-                    }
-                }
-                if let Some(mut process) = thread_child
-                    .lock()
-                    .expect("observer child mutex poisoned")
-                    .take()
-                {
-                    let _ = process.wait();
-                }
-                if thread_stop.load(Ordering::Relaxed) {
-                    break;
-                }
-                tracing::warn!("pactl observer exited; restarting");
-                sleep_interruptibly(&thread_stop, delays[attempts.min(delays.len() - 1)]);
-                attempts += 1;
-            }
-        });
-
-        (
-            Self {
-                stop,
-                child,
-                thread: Some(handle),
-            },
-            receiver,
-        )
-    }
-}
-
-impl Drop for AudioObserver {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(process) = self
-            .child
-            .lock()
-            .expect("observer child mutex poisoned")
-            .as_mut()
-        {
-            let _ = process.kill();
-        }
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
-
-fn sleep_interruptibly(stop: &AtomicBool, seconds: u64) {
-    for _ in 0..seconds * 10 {
-        if stop.load(Ordering::Relaxed) {
-            return;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,18 +120,5 @@ mod tests {
                 muted: true
             }
         );
-    }
-
-    #[test]
-    fn filters_subscription_events() {
-        assert!(is_relevant_subscription_event("Event 'change' on sink #74"));
-        assert!(is_relevant_subscription_event("Event 'change' on server"));
-        assert!(!is_relevant_subscription_event("Event 'new' on client #12"));
-        assert!(!is_relevant_subscription_event(
-            "Event 'change' on sink-input #75"
-        ));
-        assert!(!is_relevant_subscription_event(
-            "Event 'remove' on sink #74"
-        ));
     }
 }

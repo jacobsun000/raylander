@@ -11,8 +11,10 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use gtk::{gio, glib, prelude::*};
 
+use crate::native_observers;
+
 use crate::{
-    audio::{AudioObserver, VolumeState, WpctlBackend},
+    audio::{VolumeState, WpctlBackend},
     cli::{
         Cli, Command, InputCommand, MediaCommand, MicCommand, NotificationsCommand,
         PackagesCommand, PreviewColorScheme, SidebarCommand, SidebarSection, ToggleState,
@@ -172,7 +174,7 @@ struct Runtime {
     _tray_service: Option<TrayService>,
     tray_events: Option<Receiver<TrayEvent>>,
     tray_state: TrayState,
-    observer: Option<AudioObserver>,
+    observer: bool,
     observer_events: Option<Receiver<()>>,
     last_state: Option<VolumeState>,
     web_server: Option<WebServer>,
@@ -220,10 +222,10 @@ impl Runtime {
         let (observer, observer_events) = if config.components.volume_osd.observe_external
             || config.components.external_dock.enabled
         {
-            let (observer, receiver) = AudioObserver::start();
-            (Some(observer), Some(receiver))
+            let receiver = native_observers::observe_volume();
+            (true, Some(receiver))
         } else {
-            (None, None)
+            (false, None)
         };
         let web_server = if config.components.external_dock.enabled {
             match WebServer::start(&config.components.external_dock) {
@@ -532,13 +534,12 @@ impl Runtime {
         self.shell = new_shell;
         let needs_audio_observer = new_config.components.volume_osd.observe_external
             || new_config.components.external_dock.enabled;
-        if needs_audio_observer != self.observer.is_some() {
+        if needs_audio_observer != self.observer {
             if needs_audio_observer {
-                let (observer, receiver) = AudioObserver::start();
-                self.observer = Some(observer);
-                self.observer_events = Some(receiver);
+                self.observer = true;
+                self.observer_events = Some(native_observers::observe_volume());
             } else {
-                self.observer = None;
+                self.observer = false;
                 self.observer_events = None;
             }
         }

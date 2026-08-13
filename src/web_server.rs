@@ -4,7 +4,7 @@ use std::{
     io::{BufRead, BufReader},
     net::SocketAddr,
     os::unix::net::UnixStream,
-    process::{Command, Stdio},
+    process::Command,
     sync::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
@@ -589,17 +589,12 @@ async fn send_time(mut socket: WebSocket) {
 }
 
 fn start_event_sources() {
-    observe_command(
-        DockEvent::Media,
-        [
-            "playerctl",
-            "--all-players",
-            "metadata",
-            "--follow",
-            "--format",
-            "{{status}} {{xesam:title}}",
-        ],
-    );
+    let media_events = crate::native_observers::observe_media();
+    thread::spawn(move || {
+        while media_events.recv().is_ok() {
+            emit(DockEvent::Media);
+        }
+    });
     observe_input_method();
     observe_hyprland();
     observe_agents();
@@ -633,32 +628,6 @@ fn observe_calendar() {
                 }
             }
             thread::sleep(Duration::from_secs(5 * 60));
-        }
-    });
-}
-
-fn observe_command<const N: usize>(event: DockEvent, command: [&'static str; N]) {
-    thread::spawn(move || {
-        loop {
-            let Ok(mut child) = Command::new(command[0])
-                .args(&command[1..])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn()
-            else {
-                thread::sleep(Duration::from_secs(5));
-                continue;
-            };
-            if let Some(stdout) = child.stdout.take() {
-                for line in BufReader::new(stdout).lines() {
-                    if line.is_err() {
-                        break;
-                    }
-                    emit(event);
-                }
-            }
-            let _ = child.wait();
-            thread::sleep(Duration::from_secs(1));
         }
     });
 }
