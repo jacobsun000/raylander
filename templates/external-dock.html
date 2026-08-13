@@ -4,30 +4,58 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Raylander External Dock</title>
+  <link rel="stylesheet" href="/assets/external-dock.css">
   <script src="/assets/htmx.min.js"></script>
   <script src="/assets/htmx-ext-ws.js"></script>
   <script>
     document.addEventListener("htmx:wsClose", () => {
-      const reloadWhenReady = () => {
-        fetch("/", { cache: "no-store" })
-          .then(response => response.ok ? location.reload() : setTimeout(reloadWhenReady, 1000))
-          .catch(() => setTimeout(reloadWhenReady, 1000));
-      };
+      const reloadWhenReady = () => fetch("/", { cache: "no-store" })
+        .then(response => response.ok ? location.reload() : setTimeout(reloadWhenReady, 1000))
+        .catch(() => setTimeout(reloadWhenReady, 1000));
       setTimeout(reloadWhenReady, 1000);
     }, { once: true });
   </script>
-  <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-    body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #0b0c0f; color: #f1f2f5; }
-    main { padding: 2rem; text-align: center; }
-    h1 { margin: 0 0 1rem; font-size: clamp(2rem, 10vw, 5rem); }
-    time { font: 500 clamp(1.5rem, 8vw, 4rem) ui-monospace, monospace; font-variant-numeric: tabular-nums; }
-  </style>
 </head>
-<body>
-  <main hx-ext="ws" ws-connect="/ws">
-    <h1>Hello World</h1>
-    <time id="server-time">{{ initial_time }}</time>
+<body class="min-h-screen bg-[#0b0c0f] font-sans text-[#f1f2f5] antialiased [color-scheme:dark]">
+  <main id="dashboard" class="mx-auto grid min-h-dvh w-full max-w-6xl grid-cols-1 content-center gap-3 p-4 sm:grid-cols-2 sm:p-8 lg:grid-cols-4" hx-ext="ws" ws-connect="/ws">
+    <section id="clock-card" class="relative overflow-hidden rounded-[18px] border border-white/10 bg-[#16181e] p-6 shadow-2xl sm:col-span-2 lg:row-span-2">
+      <div class="absolute right-5 top-5 size-2 rounded-full bg-[#0a7cff] shadow-[0_0_16px_#0a7cff]"></div>
+      <p id="date" class="font-mono text-xs uppercase tracking-[0.16em] text-[#a6acb9]">{{ initial_date }}</p>
+      <time id="server-time" class="mt-8 block font-mono text-[clamp(4rem,12vw,8rem)] font-medium leading-none tracking-[-0.07em] tabular-nums">{{ initial_time }}</time>
+      <p class="mt-5 text-sm text-[#666d7b]">Local time</p>
+    </section>
+
+    <section id="volume-card" class="card flex items-center gap-4 rounded-[18px] border border-white/10 bg-[#16181e] p-5">
+      <span class="widget-icon grid size-11 shrink-0 place-items-center rounded-xl bg-white/[.06] text-xl">◕</span>
+      <div><p class="label">Volume</p><p id="volume" class="value">—</p></div>
+    </section>
+    <section id="bluetooth-card" class="card flex items-center gap-4 rounded-[18px] border border-white/10 bg-[#16181e] p-5">
+      <span class="widget-icon grid size-11 shrink-0 place-items-center rounded-xl bg-[#0a7cff]/15 text-[#0a7cff]">ᛒ</span>
+      <div class="min-w-0"><p class="label">Bluetooth</p><p id="bluetooth" class="value truncate">—</p></div>
+    </section>
+
+    <section id="media-card" class="rounded-[18px] border border-white/10 bg-[#16181e] p-5 sm:col-span-2">
+      <div class="flex items-center gap-4"><span class="widget-icon grid size-12 shrink-0 place-items-center rounded-xl bg-[#0a7cff] text-xl text-white">♪</span><div class="min-w-0"><p class="label">Now playing</p><p id="media-title" class="value truncate">Nothing playing</p><p id="media-artist" class="mt-1 truncate text-xs text-[#666d7b]"></p></div></div>
+    </section>
+
+    <section id="packages-card" class="rounded-[18px] border border-white/10 bg-[#16181e] p-5">
+      <p class="label">Package updates</p><p id="packages-total" class="mt-3 font-mono text-4xl font-semibold tabular-nums">—</p><div class="mt-3 flex gap-2 font-mono text-xs text-[#a6acb9]"><span id="packages-pacman" class="rounded-md bg-white/[.06] px-2 py-1">pacman —</span><span id="packages-paru" class="rounded-md bg-white/[.06] px-2 py-1">paru —</span></div>
+    </section>
+    <section id="focus-card" class="rounded-[18px] border border-white/10 bg-[#16181e] p-5">
+      <p class="label">Focus</p><p id="window" class="value mt-3 truncate">Desktop</p><p id="workspace" class="mt-2 font-mono text-xs text-[#0a7cff]">Workspace —</p>
+    </section>
+
+    <section id="brightness-card" class="rounded-[18px] border border-white/10 bg-[#16181e] p-5 sm:col-span-2">
+      <div class="mb-4 flex items-center justify-between"><p class="label">Display brightness</p><span class="text-[#e8a13a]">☀</span></div><div id="brightness" class="grid gap-3"><p class="text-sm text-[#666d7b]">Detecting displays…</p></div>
+    </section>
+    <section id="system-card" class="rounded-[18px] border border-white/10 bg-[#16181e] p-5 sm:col-span-2">
+      <p class="label mb-4">System status</p><div class="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
+        <div><div class="flex justify-between"><span class="metric">CPU</span><span id="cpu" class="metric-value">—</span></div><div class="track"><i id="cpu-bar"></i></div></div>
+        <div><div class="flex justify-between"><span class="metric">Memory</span><span id="memory" class="metric-value">—</span></div><div class="track"><i id="memory-bar"></i></div></div>
+        <div><div class="flex justify-between"><span class="metric">Disk</span><span id="disk" class="metric-value">—</span></div><div class="track"><i id="disk-bar"></i></div></div>
+        <div><div class="flex justify-between"><span class="metric">GPU</span><span id="gpu" class="metric-value">—</span></div><div class="track"><i id="gpu-bar"></i></div></div>
+      </div>
+    </section>
   </main>
 </body>
 </html>

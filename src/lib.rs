@@ -14,6 +14,7 @@ pub mod packages;
 pub mod power;
 mod shell;
 mod shell_sources;
+mod system_status;
 mod theme;
 pub mod tray;
 pub mod tray_service;

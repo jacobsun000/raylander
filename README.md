@@ -60,7 +60,17 @@ is active contacts the existing process rather than replacing it. Apply config
 changes with `cargo run -- reload`; after rebuilding code, restart with
 `cargo run -- quit` followed by `cargo run -- daemon`.
 
-For development hot reload, install `cargo-watch` and run the development script:
+The external dock CSS is built with Tailwind CSS and committed so normal Rust
+builds do not require Node.js. After changing its template or
+`assets/web/tailwind.css`, regenerate the bundled stylesheet:
+
+```sh
+npm install
+npm run build:css
+```
+
+For development hot reload, install `cargo-watch` and run the development script.
+Run `npm run watch:css` in a second terminal when working on the external dock:
 
 ```sh
 cargo install cargo-watch

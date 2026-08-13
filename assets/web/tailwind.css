@@ -1,0 +1,51 @@
+@import "tailwindcss";
+@source "../../templates/external-dock.html";
+
+@layer components {
+  .label { @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-[#666d7b]; }
+  .value { @apply mt-1 text-lg font-semibold text-[#f1f2f5]; }
+  .metric { @apply text-xs text-[#a6acb9]; }
+  .metric-value { @apply font-mono text-xs tabular-nums text-[#f1f2f5]; }
+  .track { @apply mt-2 h-1.5 overflow-hidden rounded-full bg-white/[.06]; }
+  .track i { @apply block h-full rounded-full bg-[#0a7cff] transition-[width] duration-500; width: 0%; }
+}
+
+/* A landscape phone is the dock's primary display: use every pixel without
+   scrolling and preserve readable, glanceable card proportions. */
+@media (orientation: landscape) and (max-height: 600px) {
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  #dashboard {
+    width: 100%; height: 100dvh; max-width: none; min-height: 0;
+    padding: 8px; gap: 8px; align-content: stretch;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+      "clock clock clock volume volume bluetooth bluetooth packages packages focus focus focus"
+      "clock clock clock media media media media media brightness brightness brightness brightness"
+      "system system system system system system system system brightness brightness brightness brightness";
+  }
+  #dashboard > section { min-width: 0; min-height: 0; overflow: hidden; padding: 12px; border-radius: 14px; }
+  #clock-card { grid-area: clock; }
+  #volume-card { grid-area: volume; }
+  #bluetooth-card { grid-area: bluetooth; }
+  #media-card { grid-area: media; }
+  #packages-card { grid-area: packages; }
+  #focus-card { grid-area: focus; }
+  #brightness-card { grid-area: brightness; }
+  #system-card { grid-area: system; }
+  #clock-card time { margin-top: clamp(12px, 5vh, 28px); font-size: clamp(3rem, 7.4vw, 4.25rem); letter-spacing: -.06em; }
+  #clock-card > p:last-child { margin-top: 10px; }
+  #dashboard .widget-icon { width: 36px; height: 36px; border-radius: 10px; }
+  #dashboard .value { font-size: 15px; line-height: 1.2; }
+  #volume-card, #bluetooth-card { justify-content: center; gap: 8px; padding-inline: 8px; }
+  #volume-card .widget-icon, #bluetooth-card .widget-icon { width: 32px; height: 32px; }
+  #volume-card .label, #bluetooth-card .label { display: none; }
+  #volume-card .value, #bluetooth-card .value { margin-top: 0; white-space: nowrap; }
+  #packages-card > p:nth-child(2) { margin-top: 4px; font-size: 28px; line-height: 1; }
+  #packages-card > div { margin-top: 6px; gap: 4px; }
+  #packages-card > div span { padding: 2px 5px; font-size: 9px; }
+  #focus-card .value { margin-top: 6px; }
+  #brightness-card > div:first-child, #system-card > p:first-child { margin-bottom: 8px; }
+  #brightness { gap: 8px; }
+  #system-card > div { height: calc(100% - 20px); align-items: center; }
+}

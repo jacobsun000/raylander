@@ -39,6 +39,16 @@ impl DdcutilBackend {
         parse_ddcutil_brightness(&output)
     }
 
+    pub fn all_brightness(&self) -> Result<Vec<(DdcDisplay, Brightness)>> {
+        self.displays()?
+            .into_iter()
+            .map(|display| {
+                self.brightness(display.number)
+                    .map(|value| (display, value))
+            })
+            .collect()
+    }
+
     pub fn set_brightness(&self, display: u32, percent: u8) -> Result<()> {
         if percent > 100 {
             bail!("brightness must be between 0 and 100");
