@@ -1,4 +1,6 @@
 use std::{
+    collections::HashMap,
+    hash::{DefaultHasher, Hash, Hasher},
     io::{BufRead, BufReader},
     net::SocketAddr,
     os::unix::net::UnixStream,
@@ -49,6 +51,7 @@ static AGENT_STATE: OnceLock<Mutex<AgentWidgetState>> = OnceLock::new();
 static CALENDAR_URLS: OnceLock<Vec<String>> = OnceLock::new();
 static CALENDAR_EVENTS: OnceLock<Mutex<Vec<CalendarEvent>>> = OnceLock::new();
 static SPECTRUM: OnceLock<Mutex<[u8; 16]>> = OnceLock::new();
+static ARTWORK_CACHE: OnceLock<Mutex<HashMap<u64, Vec<u8>>>> = OnceLock::new();
 
 #[derive(Default)]
 struct AgentWidgetState {
@@ -468,21 +471,25 @@ async fn weather_details(
     }
 }
 
-async fn artwork() -> Response {
-    let result = tokio::task::spawn_blocking(|| {
-        let media = PlayerctlBackend.current().ok()??;
-        let url = media.artwork_url?;
-        let path = url.strip_prefix("file://")?;
-        std::fs::read(path).ok()
-    })
-    .await
-    .ok()
-    .flatten();
+#[derive(Deserialize)]
+struct ArtworkQuery {
+    t: Option<u64>,
+}
+
+async fn artwork(axum::extract::Query(query): axum::extract::Query<ArtworkQuery>) -> Response {
+    let result = query.t.and_then(|key| {
+        ARTWORK_CACHE
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(&key)
+            .cloned()
+    });
     match result {
         Some(bytes) => (
             [
                 (header::CONTENT_TYPE, "image/*"),
-                (header::CACHE_CONTROL, "no-cache"),
+                (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
             ],
             bytes,
         )
@@ -839,7 +846,45 @@ fn media_primary_control(status: PlaybackStatus) -> &'static str {
     }
 }
 
+fn media_art_key(media: &crate::media::MediaState) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    media.player.hash(&mut hasher);
+    media.title.hash(&mut hasher);
+    media.artwork_url.hash(&mut hasher);
+    let key = hasher.finish();
+    if let Some(url) = media.artwork_url.as_deref() {
+        let cache = ARTWORK_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        let needs_load = !cache
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .contains_key(&key);
+        if needs_load && let Some(bytes) = load_artwork(url) {
+            let mut cache = cache.lock().unwrap_or_else(|error| error.into_inner());
+            if cache.len() >= 12 {
+                cache.clear();
+            }
+            cache.insert(key, bytes);
+        }
+    }
+    key
+}
+
+fn load_artwork(url: &str) -> Option<Vec<u8>> {
+    if let Some(path) = url.strip_prefix("file://") {
+        return std::fs::read(path).ok();
+    }
+    if url.starts_with("https://") || url.starts_with("http://") {
+        let output = Command::new("curl")
+            .args(["--fail", "--silent", "--max-time", "5", url])
+            .output()
+            .ok()?;
+        return output.status.success().then_some(output.stdout);
+    }
+    None
+}
+
 fn media_fullscreen(media: &crate::media::MediaState) -> String {
+    let art_key = media_art_key(media);
     let primary = media_primary_control(media.status);
     let progress = match (media.position_micros, media.duration_micros) {
         (Some(position), Some(duration)) if duration > 0 => {
@@ -853,7 +898,7 @@ fn media_fullscreen(media: &crate::media::MediaState) -> String {
         ""
     };
     format!(
-        r#"<div id="media-full-panel" class="media-full-panel no-lyrics{playing}" hx-swap-oob="outerHTML"><div class="media-full-ambient"><i></i><i></i><i></i></div><div id="media-visualizer" class="media-visualizer"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><section class="media-full-left"><img src="/artwork" alt="Album artwork"><h2>{}</h2><p>{}</p><div class="media-progress-wrap"><div class="media-progress"><i style="width:{progress}%"></i></div></div><div class="media-full-controls"><button onclick="fetch('/media/previous',{{method:'POST'}})"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button>{primary}<button onclick="fetch('/media/next',{{method:'POST'}})"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 5l9 7-9 7z"/></svg></button></div></section></div>"#,
+        r#"<div id="media-full-panel" class="media-full-panel no-lyrics{playing}" hx-swap-oob="outerHTML"><div class="media-full-ambient"><i></i><i></i><i></i></div><div id="media-visualizer" class="media-visualizer"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><section class="media-full-left"><img src="/artwork?t={art_key}" alt="Album artwork"><h2>{}</h2><p>{}</p><div class="media-progress-wrap"><div class="media-progress"><i style="width:{progress}%"></i></div></div><div class="media-full-controls"><button onclick="fetch('/media/previous',{{method:'POST'}})"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button>{primary}<button onclick="fetch('/media/next',{{method:'POST'}})"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 5l9 7-9 7z"/></svg></button></div></section></div>"#,
         escape(&media.title),
         escape(&media.artists.join(", "))
     )
@@ -867,7 +912,7 @@ fn media_fragment() -> String {
             let primary_action = media_primary_control(media.status);
             html.push_str(&format!(r#"<div id="media-ambient" class="media-ambient{playing}" hx-swap-oob="outerHTML"><i></i><i></i><i></i></div>"#));
             html.push_str(&format!(r#"<div id="media-empty" class="media-empty hidden" hx-swap-oob="outerHTML"></div><div id="media-copy" class="media-copy" hx-swap-oob="outerHTML"><p id="media-title" class="value truncate">{}</p><p id="media-artist" class="truncate text-[9px] text-[#a6acb9]">{}</p><div class="media-controls" onclick="event.stopPropagation()"><button onclick="fetch('/media/previous',{{method:'POST'}})" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button>{primary_action}<button onclick="fetch('/media/next',{{method:'POST'}})" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 5l9 7-9 7z"/></svg></button></div></div>"#, escape(&media.title), escape(&media.artists.join(", "))));
-            if media.artwork_url.is_some() { html.push_str(&format!(r#"<img id="media-art" src="/artwork?t={}" alt="" hx-swap-oob="outerHTML" onerror="this.hidden=true" onload="this.hidden=false">"#, Instant::now().elapsed().as_nanos())); }
+            if media.artwork_url.is_some() { html.push_str(&format!(r#"<img id="media-art" src="/artwork?t={}" alt="" hx-swap-oob="outerHTML" onerror="this.hidden=true" onload="this.hidden=false">"#, media_art_key(&media))); }
             html.push_str(&media_fullscreen(&media));
         }
         _ => html.push_str(r#"<div id="media-ambient" class="media-ambient" hx-swap-oob="outerHTML"></div><img id="media-art" hidden hx-swap-oob="outerHTML" alt=""><div id="media-empty" class="media-empty" hx-swap-oob="outerHTML" aria-hidden="true"><img src="/assets/arch-logo.png" alt=""></div><div id="media-copy" class="media-copy hidden" hx-swap-oob="outerHTML"></div>"#),
@@ -1125,7 +1170,7 @@ fn dashboard_fragment() -> String {
             replace(&mut html, "media-artist", &media.artists.join(", "));
             html.push_str(&format!(r#"<div id="media-empty" class="media-empty hidden" hx-swap-oob="outerHTML"></div><div id="media-copy" class="media-copy" hx-swap-oob="outerHTML"><p id="media-title" class="value truncate"></p><p id="media-artist" class="truncate text-[9px] text-[#a6acb9]"></p><div class="media-controls" onclick="event.stopPropagation()"><button onclick="fetch('/media/previous',{{method:'POST'}})" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"/></svg></button>{primary_action}<button onclick="fetch('/media/next',{{method:'POST'}})" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 5l9 7-9 7z"/></svg></button></div></div>"#));
             if media.artwork_url.is_some() {
-                html.push_str(r#"<img id="media-art" src="/artwork" alt="" hx-swap-oob="outerHTML" onerror="this.hidden=true" onload="this.hidden=false">"#);
+                html.push_str(&format!(r#"<img id="media-art" src="/artwork?t={}" alt="" hx-swap-oob="outerHTML" onerror="this.hidden=true" onload="this.hidden=false">"#, media_art_key(&media)));
             }
             html.push_str(&media_fullscreen(&media));
         }
