@@ -39,13 +39,15 @@
   .media-controls { @apply mt-2 flex items-center justify-center gap-4; }
   .media-controls button { @apply grid size-8 place-items-center rounded-full bg-white/15 text-white; }
   .media-controls svg { @apply size-4 fill-current; }
-  .monitor-grid { @apply grid h-full grid-cols-3 gap-6; }
-  .monitor-view { @apply flex min-w-0 flex-col items-center justify-center gap-2 text-center; }
-  .monitor-view p { @apply h-5 w-full truncate text-sm font-semibold; }
+  .monitor-layout { @apply grid h-full min-h-0 grid-rows-[auto_1fr] gap-2; }
+  .focus-title { @apply w-full truncate text-center text-sm font-semibold; }
+  .monitor-grid { @apply grid min-h-0 grid-cols-3 gap-6; }
+  .monitor-view { @apply flex min-w-0 items-center justify-center; }
   .workspace-dots { @apply grid grid-cols-3 gap-2; }
   .workspace-dots i { @apply size-3 rounded-full border-2 border-white/20; }
   .workspace-dots i.occupied { @apply border-[#0a7cff]; }
   .workspace-dots i.active { @apply border-[#0a7cff] bg-[#0a7cff]; }
+  .workspace-dots i.active.focused { @apply border-[#f59e0b] bg-[#f59e0b]; }
   .system-grid { @apply grid h-full grid-cols-2 content-center gap-x-5 gap-y-4; }
   .metric-row { @apply flex items-center justify-between text-sm text-[#a6acb9]; }
   .metric-row svg { @apply size-5 fill-current; }

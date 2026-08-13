@@ -654,26 +654,54 @@ fn weather_description(code: u8) -> (&'static str, &'static str) {
 fn hyprland_fragment() -> Option<String> {
     let monitors: Vec<HyprMonitor> = hyprctl_json("monitors")?;
     let workspaces: Vec<HyprWorkspace> = hyprctl_json("workspaces")?;
-    Some(monitors.into_iter().map(|monitor| {
-        let base = monitor.id * 9 + 1;
-        let active = monitor.active_workspace.id;
-        let title = if monitor.focused {
-            workspaces.iter().find(|workspace| workspace.id == active)
-                .map(|workspace| workspace.last_window_title.as_str())
-                .filter(|title| !title.trim().is_empty())
-                .unwrap_or("Desktop")
-        } else {
-            ""
-        };
-        let title = if title.to_ascii_lowercase().contains("firefox") { "Firefox" } else { title };
-        let dots = [6, 7, 8, 3, 4, 5, 0, 1, 2].into_iter().map(|offset| {
-            let id = base + offset;
-            let occupied = workspaces.iter().any(|workspace| workspace.id == id && workspace.windows > 0);
-            let class = if id == active { "active" } else if occupied { "occupied" } else { "" };
-            format!(r#"<i class="{class}"></i>"#)
-        }).collect::<String>();
-        format!(r#"<div class="monitor-view"><p title="{}">{}</p><div class="workspace-dots">{dots}</div></div>"#, escape(title), escape(title))
-    }).collect())
+    let focused_title = monitors
+        .iter()
+        .find(|monitor| monitor.focused)
+        .and_then(|monitor| {
+            workspaces
+                .iter()
+                .find(|workspace| workspace.id == monitor.active_workspace.id)
+        })
+        .map(|workspace| workspace.last_window_title.as_str())
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or("Desktop");
+    let focused_title = if focused_title.to_ascii_lowercase().contains("firefox") {
+        "Firefox"
+    } else {
+        focused_title
+    };
+    let monitor_views = monitors
+        .into_iter()
+        .map(|monitor| {
+            let base = monitor.id * 9 + 1;
+            let active = monitor.active_workspace.id;
+            let dots = [6, 7, 8, 3, 4, 5, 0, 1, 2]
+                .into_iter()
+                .map(|offset| {
+                    let id = base + offset;
+                    let occupied = workspaces
+                        .iter()
+                        .any(|workspace| workspace.id == id && workspace.windows > 0);
+                    let class = if id == active && monitor.focused {
+                        "active focused"
+                    } else if id == active {
+                        "active"
+                    } else if occupied {
+                        "occupied"
+                    } else {
+                        ""
+                    };
+                    format!(r#"<i class="{class}"></i>"#)
+                })
+                .collect::<String>();
+            format!(r#"<div class="monitor-view"><div class="workspace-dots">{dots}</div></div>"#)
+        })
+        .collect::<String>();
+    Some(format!(
+        r#"<p class="focus-title" title="{}">{}</p><div class="monitor-grid">{monitor_views}</div>"#,
+        escape(focused_title),
+        escape(focused_title)
+    ))
 }
 
 fn hyprctl_json<T: for<'de> Deserialize<'de>>(query: &str) -> Option<T> {
