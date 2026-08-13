@@ -1,2 +1,5 @@
 /target
 /node_modules
+/android/.gradle
+/android/local.properties
+/android/**/build

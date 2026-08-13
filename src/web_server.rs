@@ -45,6 +45,7 @@ enum DockEvent {
     Media,
     InputMethod,
     Hyprland,
+    DisplayPower,
 }
 
 #[derive(Template)]
@@ -300,10 +301,15 @@ fn observe_hyprland() {
             };
             for line in BufReader::new(stream).lines() {
                 let Ok(line) = line else { break };
-                if (line.starts_with("activewindow") || line.starts_with("workspace"))
-                    && let Some(events) = EVENTS.get()
-                {
-                    let _ = events.send(DockEvent::Hyprland);
+                if let Some(events) = EVENTS.get() {
+                    if line.starts_with("activewindow") || line.starts_with("workspace") {
+                        let _ = events.send(DockEvent::Hyprland);
+                    } else if line.starts_with("monitoradded")
+                        || line.starts_with("monitorremoved")
+                        || line.starts_with("configreloaded")
+                    {
+                        let _ = events.send(DockEvent::DisplayPower);
+                    }
                 }
             }
         }
@@ -363,6 +369,7 @@ fn event_fragment(event: DockEvent) -> String {
         DockEvent::Media => media_fragment(),
         DockEvent::InputMethod => input_method_fragment(),
         DockEvent::Hyprland => hyprland_oob_fragment(),
+        DockEvent::DisplayPower => display_power_fragment(),
     }
 }
 
@@ -397,6 +404,12 @@ fn input_method_fragment() -> String {
     html
 }
 
+fn display_power_fragment() -> String {
+    let enabled =
+        hyprctl_json::<Vec<HyprMonitor>>("monitors").is_some_and(|monitors| !monitors.is_empty());
+    format!(r#"<div id="display-power" data-on="{enabled}" hidden hx-swap-oob="outerHTML"></div>"#)
+}
+
 fn hyprland_oob_fragment() -> String {
     let mut html = String::new();
     if let Some(monitors) = hyprland_fragment() {
@@ -428,7 +441,7 @@ fn dashboard_fragment() -> String {
     static LAST_VOLUME: OnceLock<Mutex<Option<u16>>> = OnceLock::new();
     static LAST_BRIGHTNESS: OnceLock<Mutex<Option<u8>>> = OnceLock::new();
 
-    let mut html = String::new();
+    let mut html = display_power_fragment();
     if let Ok(volume) = WpctlBackend.current() {
         let percent = if volume.muted {
             0
