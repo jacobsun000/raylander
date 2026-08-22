@@ -1,7 +1,9 @@
 package com.raylander.dock
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.pm.PackageManager
 import android.app.AlertDialog
 import android.graphics.Color
 import android.os.Bundle
@@ -11,6 +13,7 @@ import android.view.WindowManager
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
+import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -30,6 +33,9 @@ class MainActivity : Activity() {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
         enterImmersiveMode()
+        if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION), LOCATION_PERMISSION_REQUEST)
+        }
 
         webView = WebView(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -40,7 +46,18 @@ class MainActivity : Activity() {
             isVerticalScrollBarEnabled = false
             isHorizontalScrollBarEnabled = false
             webViewClient = WebViewClient()
-            webChromeClient = WebChromeClient()
+            webChromeClient = object : WebChromeClient() {
+                override fun onGeolocationPermissionsShowPrompt(
+                    origin: String,
+                    callback: GeolocationPermissions.Callback,
+                ) {
+                    callback.invoke(
+                        origin,
+                        checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED,
+                        false,
+                    )
+                }
+            }
             addJavascriptInterface(ScreenBridge(this@MainActivity), "RaylanderAndroid")
             setOnLongClickListener {
                 showServerDialog()
@@ -136,7 +153,7 @@ class MainActivity : Activity() {
     private fun setDockDisplay(enabled: Boolean) {
         displayEnabled = enabled
         val attributes = window.attributes
-        attributes.screenBrightness = if (enabled) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_FULL else 0f
+        attributes.screenBrightness = if (enabled) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE else 0f
         window.attributes = attributes
         webView.visibility = if (enabled) View.VISIBLE else View.INVISIBLE
         window.decorView.setBackgroundColor(Color.BLACK)
@@ -154,5 +171,6 @@ class MainActivity : Activity() {
         private const val KEY_PORT = "port"
         private const val DEFAULT_HOST = "192.168.1.100"
         private const val DEFAULT_PORT = 3000
+        private const val LOCATION_PERMISSION_REQUEST = 1
     }
 }

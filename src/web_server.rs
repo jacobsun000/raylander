@@ -225,6 +225,7 @@ fn router() -> Router {
         .route("/agent/focus/{pane_id}", post(focus_agent_by_id))
         .route("/workspace/{id}", post(focus_workspace))
         .route("/weather-details", get(weather_details))
+        .route("/location-name", get(location_name))
         .route(
             "/assets/external-dock.css",
             get(|| async { stylesheet(EXTERNAL_DOCK_CSS) }),
@@ -520,14 +521,83 @@ async fn focus_workspace(axum::extract::Path(id): axum::extract::Path<i32>) -> S
 #[derive(Deserialize)]
 struct WeatherDetailsQuery {
     city: Option<String>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
+}
+
+#[derive(Deserialize)]
+struct LocationQuery {
+    latitude: f64,
+    longitude: f64,
+}
+
+async fn location_name(
+    axum::extract::Query(query): axum::extract::Query<LocationQuery>,
+) -> Response {
+    if !(-90.0..=90.0).contains(&query.latitude) || !(-180.0..=180.0).contains(&query.longitude) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let url = format!(
+        "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={}&lon={}",
+        query.latitude, query.longitude
+    );
+    match tokio::task::spawn_blocking(move || {
+        Command::new("curl")
+            .args([
+                "--fail",
+                "--silent",
+                "--max-time",
+                "8",
+                "--user-agent",
+                "Raylander/0.1",
+                &url,
+            ])
+            .output()
+    })
+    .await
+    {
+        Ok(Ok(output)) if output.status.success() => {
+            let value: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+                Ok(value) => value,
+                Err(_) => return StatusCode::BAD_GATEWAY.into_response(),
+            };
+            let address = &value["address"];
+            let name = ["city", "town", "village", "municipality", "county"]
+                .iter()
+                .find_map(|key| address[*key].as_str());
+            match name {
+                Some(name) => name
+                    .strip_suffix(" County")
+                    .unwrap_or(name)
+                    .to_owned()
+                    .into_response(),
+                None => StatusCode::NOT_FOUND.into_response(),
+            }
+        }
+        _ => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    }
 }
 
 async fn weather_details(
     axum::extract::Query(query): axum::extract::Query<WeatherDetailsQuery>,
 ) -> Response {
     let configured = WEATHER_COORDS.get();
+    let phone_location = query
+        .latitude
+        .zip(query.longitude)
+        .filter(|(latitude, longitude)| {
+            (-90.0..=90.0).contains(latitude) && (-180.0..=180.0).contains(longitude)
+        });
+    let phone_coordinates =
+        phone_location.map(|(latitude, longitude)| (latitude.to_string(), longitude.to_string()));
     let (latitude, longitude) = match query.city.as_deref().unwrap_or("minneapolis") {
-        "minneapolis" => ("44.9778", "-93.2650"),
+        "minneapolis" => phone_coordinates
+            .as_ref()
+            .map(|(latitude, longitude)| (latitude.as_str(), longitude.as_str()))
+            .or_else(|| {
+                configured.map(|(latitude, longitude)| (latitude.as_str(), longitude.as_str()))
+            })
+            .unwrap_or(("44.9778", "-93.2650")),
         "los-angeles" => ("34.0522", "-118.2437"),
         "detroit" => ("42.3314", "-83.0458"),
         "new-york" => ("40.7128", "-74.0060"),

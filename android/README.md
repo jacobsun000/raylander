@@ -47,4 +47,4 @@ The page observes the element and calls:
 RaylanderAndroid.setDisplayEnabled(false)
 ```
 
-When enabled, the app restores full window brightness. This affects only the app window and does not modify Android's global brightness setting.
+When enabled, the app removes its window-level brightness override so Android restores the dock's current system brightness. This does not modify Android's global brightness setting.
