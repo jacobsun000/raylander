@@ -4,7 +4,7 @@
 //! [`BluetoothAvailability::Unavailable`] as an absent control without treating a machine without
 //! BlueZ as an application failure.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fs, process::Command};
 
 use anyhow::{Context, Result, bail};
 use zbus::{
@@ -101,7 +101,9 @@ impl BluetoothBackend {
             }
             Err(error) => return Err(error).context("query BlueZ managed objects"),
         };
-        Ok(parse_managed_objects(&objects))
+        let mut state = parse_managed_objects(&objects);
+        fill_missing_batteries(&mut state.devices);
+        Ok(state)
     }
 
     /// Powers an adapter only when `adapter_path` currently identifies a BlueZ adapter.
@@ -278,6 +280,131 @@ fn parse_managed_objects(objects: &ManagedObjects) -> BluetoothState {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct UpowerBattery {
+    native_path: String,
+    model: String,
+    serial: String,
+    percentage: u8,
+}
+
+fn fill_missing_batteries(devices: &mut [BluetoothDevice]) {
+    if devices.iter().all(|device| device.battery.is_some()) {
+        return;
+    }
+    let upower_batteries = query_upower_batteries();
+    for device in devices.iter_mut().filter(|device| device.battery.is_none()) {
+        let percentage = upower_batteries
+            .iter()
+            .find(|battery| upower_battery_matches(device, battery))
+            .map(|battery| battery.percentage)
+            .or_else(|| sysfs_battery_percentage(&device.address));
+        if let Some(percentage) = percentage {
+            device.battery = Some(BluetoothBattery { percentage });
+        }
+    }
+}
+
+fn query_upower_batteries() -> Vec<UpowerBattery> {
+    let Ok(output) = Command::new("upower").arg("--enumerate").output() else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let Ok(paths) = String::from_utf8(output.stdout) else {
+        return Vec::new();
+    };
+    paths
+        .lines()
+        .map(str::trim)
+        .filter(|path| !path.is_empty() && !path.ends_with("/DisplayDevice"))
+        .filter_map(|path| {
+            let output = Command::new("upower")
+                .args(["--show-info", path])
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let info = String::from_utf8(output.stdout).ok()?;
+            parse_upower_battery_info(path, &info)
+        })
+        .collect()
+}
+
+fn parse_upower_battery_info(path: &str, output: &str) -> Option<UpowerBattery> {
+    let percentage = upower_property(output, "percentage")?
+        .trim_end_matches('%')
+        .parse::<f32>()
+        .ok()?;
+    if !percentage.is_finite() || !(0.0..=100.0).contains(&percentage) {
+        return None;
+    }
+    Some(UpowerBattery {
+        native_path: upower_property(output, "native-path")
+            .unwrap_or(path)
+            .to_owned(),
+        model: upower_property(output, "model")
+            .unwrap_or_default()
+            .to_owned(),
+        serial: upower_property(output, "serial")
+            .unwrap_or_default()
+            .to_owned(),
+        percentage: percentage.round() as u8,
+    })
+}
+
+fn upower_property<'a>(output: &'a str, name: &str) -> Option<&'a str> {
+    output.lines().find_map(|line| {
+        let (key, value) = line.trim().split_once(':')?;
+        (key == name).then(|| value.trim())
+    })
+}
+
+fn upower_battery_matches(device: &BluetoothDevice, battery: &UpowerBattery) -> bool {
+    let address = compact_identifier(&device.address);
+    (!address.is_empty()
+        && [battery.serial.as_str(), battery.native_path.as_str()]
+            .into_iter()
+            .map(compact_identifier)
+            .any(|candidate| candidate.contains(&address)))
+        || (!battery.model.is_empty() && battery.model.eq_ignore_ascii_case(&device.name))
+}
+
+fn sysfs_battery_percentage(address: &str) -> Option<u8> {
+    let address = compact_identifier(address);
+    if address.is_empty() {
+        return None;
+    }
+    fs::read_dir("/sys/class/power_supply")
+        .ok()?
+        .filter_map(Result::ok)
+        .find_map(|entry| {
+            let path = entry.path();
+            let name = path.file_name()?.to_str()?;
+            if !compact_identifier(name).contains(&address)
+                || fs::read_to_string(path.join("type")).ok()?.trim() != "Battery"
+            {
+                return None;
+            }
+            let percentage = fs::read_to_string(path.join("capacity"))
+                .ok()?
+                .trim()
+                .parse::<u8>()
+                .ok()?;
+            (percentage <= 100).then_some(percentage)
+        })
+}
+
+fn compact_identifier(value: &str) -> String {
+    value
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
 fn string_property(properties: &HashMap<String, OwnedValue>, name: &str) -> Option<String> {
     properties
         .get(name)
@@ -387,6 +514,33 @@ mod tests {
         assert_eq!(state.devices[0].name, "Unknown device");
         assert!(!state.devices[0].paired);
         assert_eq!(state.devices[0].battery, None);
+    }
+
+    #[test]
+    fn parses_upower_battery_and_matches_bluetooth_address() {
+        let battery = parse_upower_battery_info(
+            "/org/freedesktop/UPower/devices/battery_ps_controller",
+            "native-path: ps-controller-battery-a0:ab:51:cf:f9:f2\nmodel: DualSense Wireless Controller\nserial: a0:ab:51:cf:f9:f2\npercentage: 95%\n",
+        )
+        .unwrap();
+        assert_eq!(battery.percentage, 95);
+        let device = BluetoothDevice {
+            path: "/org/bluez/hci0/dev_A0_AB_51_CF_F9_F2".into(),
+            adapter_path: None,
+            address: "A0:AB:51:CF:F9:F2".into(),
+            name: "DualSense Wireless Controller".into(),
+            paired: true,
+            connected: true,
+            trusted: true,
+            battery: None,
+        };
+        assert!(upower_battery_matches(&device, &battery));
+    }
+
+    #[test]
+    fn rejects_upower_percentages_outside_range() {
+        assert!(parse_upower_battery_info("BAT0", "percentage: 101%\n").is_none());
+        assert!(parse_upower_battery_info("BAT0", "percentage: -1%\n").is_none());
     }
 
     #[test]

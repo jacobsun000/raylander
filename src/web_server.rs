@@ -30,7 +30,7 @@ use tokio::sync::{broadcast, oneshot};
 use crate::{
     audio::WpctlBackend,
     audio_visualizer,
-    bluetooth::{BluetoothAvailability, BluetoothBackend},
+    bluetooth::{BluetoothAvailability, BluetoothBackend, BluetoothDevice, BluetoothState},
     calendar_events::{CalendarEvent, GoogleCalendarBackend},
     config::ExternalDockConfig,
     display::DdcutilBackend,
@@ -61,6 +61,13 @@ static SPECTRUM_ACTIVE: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 static AWAKE_GENERATION: AtomicU64 = AtomicU64::new(0);
 static AWAKE_INHIBITOR: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
 static DASHBOARD_SNAPSHOT: OnceLock<Mutex<String>> = OnceLock::new();
+static BLUETOOTH_FRAGMENT: OnceLock<Mutex<FragmentCache>> = OnceLock::new();
+
+const BLUETOOTH_DIALOG_ACTION: &str = "document.querySelector('#bluetooth-dialog').showModal()";
+const BLUETOOTH_GLYPH: &str = r#"<svg viewBox="0 0 24 24"><path d="M12 2v20M12 2l7 6-7 5M12 22l7-6-7-5M5 7l14 9M5 17 19 8"/></svg>"#;
+const NETWORK_GLYPH: &str = r#"<svg viewBox="0 0 24 24"><path d="M4 10a13 13 0 0 1 16 0M8 15a6.5 6.5 0 0 1 8 0"/><circle cx="12" cy="19" r="1.4"/></svg>"#;
+const CONTROLLER_GLYPH: &str = r#"<svg viewBox="0 0 24 24"><path d="M7 7h10a4 4 0 0 1 3.9 3.1l1.1 5.4a2.5 2.5 0 0 1-4.7 1.4l-1.2-2.4H7.9l-1.2 2.4A2.5 2.5 0 0 1 2 15.5l1.1-5.4A4 4 0 0 1 7 7Z"/><path d="M6 10v4M4 12h4M15.5 11.5h.01M18 13.5h.01"/></svg>"#;
+const TRACKPAD_GLYPH: &str = r#"<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 15h18"/></svg>"#;
 
 #[derive(Default)]
 struct AgentWidgetState {
@@ -703,6 +710,7 @@ fn start_event_sources() {
             emit(DockEvent::Media);
         }
     });
+    observe_connectivity();
     observe_input_method();
     observe_hyprland();
     observe_agents();
@@ -736,6 +744,20 @@ fn observe_calendar() {
                 }
             }
             thread::sleep(Duration::from_secs(5 * 60));
+        }
+    });
+}
+
+fn observe_connectivity() {
+    thread::spawn(|| {
+        let mut previous: Option<BluetoothState> = None;
+        loop {
+            let current = zbus::block_on(BluetoothBackend.state()).ok();
+            if current != previous {
+                previous = current;
+                emit(DockEvent::Connectivity);
+            }
+            thread::sleep(Duration::from_secs(2));
         }
     });
 }
@@ -866,6 +888,15 @@ struct FragmentCache {
     value: String,
 }
 
+fn invalidate_fragment(cache: &'static OnceLock<Mutex<FragmentCache>>) {
+    if let Some(cache) = cache.get() {
+        cache
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .updated_at = None;
+    }
+}
+
 fn cached_fragment(
     cache: &'static OnceLock<Mutex<FragmentCache>>,
     max_age: Duration,
@@ -889,6 +920,71 @@ fn cached_fragment(
     cache.value.clone()
 }
 
+fn connected_bluetooth_devices(state: &BluetoothState) -> Vec<&BluetoothDevice> {
+    let mut devices: Vec<_> = state
+        .devices
+        .iter()
+        .filter(|device| device.connected)
+        .collect();
+    devices.sort_by(|left, right| {
+        bluetooth_device_priority(left)
+            .cmp(&bluetooth_device_priority(right))
+            .then_with(|| {
+                left.name
+                    .to_ascii_lowercase()
+                    .cmp(&right.name.to_ascii_lowercase())
+            })
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    devices
+}
+
+fn bluetooth_device_priority(device: &BluetoothDevice) -> u8 {
+    let name = device.name.to_ascii_lowercase();
+    if name.contains("dualsense")
+        || name.contains("playstation")
+        || name.contains("controller")
+        || name.contains("gamepad")
+    {
+        0
+    } else if name.contains("trackpad") || name.contains("touchpad") {
+        1
+    } else {
+        2
+    }
+}
+
+fn bluetooth_device_glyph(device: &BluetoothDevice) -> &'static str {
+    match bluetooth_device_priority(device) {
+        0 => CONTROLLER_GLYPH,
+        1 => TRACKPAD_GLYPH,
+        _ => BLUETOOTH_GLYPH,
+    }
+}
+
+fn bluetooth_device_control(device: &BluetoothDevice) -> String {
+    let glyph = bluetooth_device_glyph(device);
+    let battery = device
+        .battery
+        .map(|battery| {
+            let class = if battery.percentage < 20 {
+                "battery-fill low"
+            } else {
+                "battery-fill"
+            };
+            format!(
+                r#"<span class="{class}" style="height:{}%"></span>"#,
+                battery.percentage
+            )
+        })
+        .unwrap_or_default();
+    format!("{battery}{glyph}")
+}
+
+fn bluetooth_device_title(device: &BluetoothDevice) -> String {
+    device.name.clone()
+}
+
 fn event_fragment(event: DockEvent) -> String {
     match event {
         DockEvent::Volume => volume_fragment(),
@@ -898,7 +994,10 @@ fn event_fragment(event: DockEvent) -> String {
         DockEvent::DisplayPower => display_power_fragment(),
         DockEvent::Agents => agents_fragment(),
         DockEvent::Calendar => calendar_events_fragment(),
-        DockEvent::Connectivity => dashboard_fragment(),
+        DockEvent::Connectivity => {
+            invalidate_fragment(&BLUETOOTH_FRAGMENT);
+            dashboard_fragment()
+        }
         DockEvent::Spectrum => spectrum_fragment(),
     }
 }
@@ -1205,7 +1304,6 @@ fn agents_fragment() -> String {
 }
 
 fn dashboard_fragment() -> String {
-    static BLUETOOTH: OnceLock<Mutex<FragmentCache>> = OnceLock::new();
     static PACKAGES: OnceLock<Mutex<FragmentCache>> = OnceLock::new();
     static BRIGHTNESS: OnceLock<Mutex<FragmentCache>> = OnceLock::new();
     static SYSTEM: OnceLock<Mutex<FragmentCache>> = OnceLock::new();
@@ -1228,20 +1326,32 @@ fn dashboard_fragment() -> String {
         ));
     }
     html.push_str(&cached_fragment(
-        &BLUETOOTH,
+        &BLUETOOTH_FRAGMENT,
         Duration::from_millis(400),
         || {
             let state = zbus::block_on(BluetoothBackend.state()).ok()?;
-            let bluetooth_class = match state.availability {
-                BluetoothAvailability::Unavailable { .. } => "control-icon",
-                BluetoothAvailability::Available if state.devices.iter().any(|d| d.connected) => {
-                    "control-icon connected"
+            let connected_devices = connected_bluetooth_devices(&state);
+            let bluetooth_class = if connected_devices.is_empty() {
+                match &state.availability {
+                    BluetoothAvailability::Unavailable { .. } => "control-icon",
+                    BluetoothAvailability::Available
+                        if state.adapters.iter().any(|adapter| adapter.powered) =>
+                    {
+                        "control-icon active"
+                    }
+                    BluetoothAvailability::Available => "control-icon",
                 }
-                BluetoothAvailability::Available if state.adapters.iter().any(|a| a.powered) => {
-                    "control-icon active"
-                }
-                BluetoothAvailability::Available => "control-icon",
+            } else {
+                "control-icon device-control"
             };
+            let bluetooth_value = connected_devices
+                .first()
+                .map(|device| bluetooth_device_control(device))
+                .unwrap_or_else(|| BLUETOOTH_GLYPH.to_owned());
+            let bluetooth_title = connected_devices
+                .first()
+                .map(|device| bluetooth_device_title(device))
+                .unwrap_or_else(|| "Bluetooth".to_owned());
             let network = NmcliBackend.current().ok();
             let network_class = match network {
                 Some(ref state) if !state.connections.is_empty() => "control-icon connected",
@@ -1254,12 +1364,33 @@ fn dashboard_fragment() -> String {
                 Some(InputMethodStatus::Inactive) => "control-icon input-icon",
                 _ => "control-icon input-icon warning",
             };
-            let input_label = input.and_then(|state| state.name).map(|name| {
-                if name.contains("pinyin") { "中" } else { "A" }
-            }).unwrap_or("?");
+            let input_label = input
+                .and_then(|state| state.name)
+                .map(|name| if name.contains("pinyin") { "中" } else { "A" })
+                .unwrap_or("?");
             let mut fragment = String::new();
-            class_replace(&mut fragment, "bluetooth-control", bluetooth_class, r#"<svg viewBox="0 0 24 24"><path d="M12 2v20M12 2l7 6-7 5M12 22l7-6-7-5M5 7l14 9M5 17 19 8"/></svg>"#);
-            class_replace(&mut fragment, "network-control", network_class, r#"<svg viewBox="0 0 24 24"><path d="M4 10a13 13 0 0 1 16 0M8 15a6.5 6.5 0 0 1 8 0"/><circle cx="12" cy="19" r="1.4"/></svg>"#);
+            class_replace_with_action(
+                &mut fragment,
+                "bluetooth-control",
+                bluetooth_class,
+                &bluetooth_value,
+                BLUETOOTH_DIALOG_ACTION,
+                &bluetooth_title,
+            );
+            if let Some(device) = connected_devices.get(1) {
+                let value = bluetooth_device_control(device);
+                let title = bluetooth_device_title(device);
+                class_replace_with_action(
+                    &mut fragment,
+                    "network-control",
+                    "control-icon device-control",
+                    &value,
+                    BLUETOOTH_DIALOG_ACTION,
+                    &title,
+                );
+            } else {
+                class_replace(&mut fragment, "network-control", network_class, NETWORK_GLYPH);
+            }
             class_replace(&mut fragment, "input-control", input_class, input_label);
             let powered = state.adapters.first().is_some_and(|adapter| adapter.powered);
             let discovering = state.adapters.first().is_some_and(|adapter| adapter.discovering);
@@ -1522,16 +1653,37 @@ fn raw_replace(html: &mut String, id: &str, value: &str) {
     ));
 }
 fn class_replace(html: &mut String, id: &str, class: &str, value: &str) {
-    let action = match id {
-        "bluetooth-control" => {
-            r#" onclick="document.querySelector('#bluetooth-dialog').showModal()""#
-        }
-        "network-control" => r#" onclick="document.querySelector('#network-dialog').showModal()""#,
-        "input-control" => r#" onclick="fetch('/input-method/toggle',{method:'POST'})""#,
-        _ => "",
+    let (action, title) = match id {
+        "bluetooth-control" => (BLUETOOTH_DIALOG_ACTION, "Bluetooth"),
+        "network-control" => (
+            "document.querySelector('#network-dialog').showModal()",
+            "Wi-Fi",
+        ),
+        "input-control" => (
+            "fetch('/input-method/toggle',{method:'POST'})",
+            "Input method",
+        ),
+        _ => ("", ""),
+    };
+    class_replace_with_action(html, id, class, value, action, title);
+}
+
+fn class_replace_with_action(
+    html: &mut String,
+    id: &str,
+    class: &str,
+    value: &str,
+    action: &str,
+    title: &str,
+) {
+    let action = if action.is_empty() {
+        String::new()
+    } else {
+        format!(r#" onclick="{action}""#)
     };
     html.push_str(&format!(
-        r#"<span id="{id}" class="{class}"{action} hx-swap-oob="outerHTML">{value}</span>"#
+        r#"<span id="{id}" class="{class}" title="{}"{action} hx-swap-oob="outerHTML">{value}</span>"#,
+        escape(title),
     ));
 }
 fn escape(value: &str) -> String {
@@ -1584,6 +1736,58 @@ mod tests {
         assert!(page.contains("htmx:wsClose"));
         assert!(page.contains("HTMX will reconnect"));
         assert!(page.contains("toLocaleTimeString"));
+    }
+
+    fn bluetooth_test_device(
+        path: &str,
+        name: &str,
+        connected: bool,
+        battery: Option<u8>,
+    ) -> BluetoothDevice {
+        BluetoothDevice {
+            path: path.into(),
+            adapter_path: None,
+            address: path.into(),
+            name: name.into(),
+            paired: true,
+            connected,
+            trusted: true,
+            battery: battery.map(|percentage| crate::bluetooth::BluetoothBattery { percentage }),
+        }
+    }
+
+    #[test]
+    fn connected_bluetooth_devices_put_controller_before_trackpad() {
+        let state = BluetoothState {
+            availability: BluetoothAvailability::Available,
+            adapters: Vec::new(),
+            devices: vec![
+                bluetooth_test_device("trackpad", "Magic Trackpad", true, Some(42)),
+                bluetooth_test_device(
+                    "controller",
+                    "DualSense Wireless Controller",
+                    true,
+                    Some(95),
+                ),
+            ],
+        };
+        let devices = connected_bluetooth_devices(&state);
+        assert_eq!(devices[0].name, "DualSense Wireless Controller");
+        assert_eq!(devices[1].name, "Magic Trackpad");
+        let controller = bluetooth_device_control(devices[0]);
+        assert!(controller.contains("class=\"battery-fill\" style=\"height:95%\""));
+        assert!(!controller.contains("<small>"));
+        assert!(controller.contains(CONTROLLER_GLYPH));
+        assert!(bluetooth_device_control(devices[1]).contains(TRACKPAD_GLYPH));
+        assert!(
+            bluetooth_device_control(&bluetooth_test_device(
+                "low",
+                "DualSense Wireless Controller",
+                true,
+                Some(19)
+            ))
+            .contains("class=\"battery-fill low\" style=\"height:19%\"")
+        );
     }
 
     /// Run with `cargo test component_load_benchmark -- --ignored --nocapture`.
