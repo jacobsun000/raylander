@@ -35,7 +35,14 @@ The app deliberately keeps its Activity awake and makes the window black with br
 
 ## Display-power protocol
 
-Raylander sends this HTMX out-of-band element after a Hyprland monitor add/remove event and when the WebSocket first connects:
+Run `raylander display-power` after changing DPMS state. For example, in `hypridle.conf`:
+
+```ini
+on-timeout = hyprctl dispatch dpms off && raylander display-power
+on-resume = hyprctl dispatch dpms on && raylander display-power
+```
+
+The command asks the running Raylander daemon to query Hyprland and broadcast this HTMX out-of-band element (the same state is also sent when the WebSocket first connects):
 
 ```html
 <div id="display-power" data-on="false" hidden hx-swap-oob="outerHTML"></div>

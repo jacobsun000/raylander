@@ -117,7 +117,7 @@ fn brightness_fragment() -> Option<String> {
     Some(html)
 }
 
-fn display_power_fragment() -> String {
+pub(crate) fn display_power_fragment() -> String {
     let enabled = DdcutilBackend.display_power_enabled().unwrap_or(false);
     format!(r#"<div id="display-power" data-on="{enabled}" hidden hx-swap-oob="outerHTML"></div>"#)
 }

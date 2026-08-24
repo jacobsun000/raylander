@@ -16,7 +16,7 @@ use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     http::{StatusCode, header},
     response::{Html, IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
 };
 use tokio::sync::{broadcast, oneshot};
 
@@ -207,6 +207,7 @@ fn router() -> Router {
     Router::new()
         .route("/", get(index))
         .route("/ws", get(websocket))
+        .route("/display-power", post(display_power))
         .merge(component_routes)
         .route(
             "/assets/external-dock.css",
@@ -244,6 +245,13 @@ async fn index() -> Response {
 
 async fn websocket(upgrade: WebSocketUpgrade) -> impl IntoResponse {
     upgrade.on_upgrade(send_time)
+}
+
+async fn display_power() -> StatusCode {
+    if let Some(transport) = TRANSPORT.get() {
+        transport.broadcast(controls::display_power_fragment());
+    }
+    StatusCode::NO_CONTENT
 }
 
 async fn send_time(mut socket: WebSocket) {
