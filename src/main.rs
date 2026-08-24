@@ -1,3 +1,3 @@
-fn main() -> gtk::glib::ExitCode {
+fn main() -> gio::glib::ExitCode {
     raylander::run()
 }

@@ -2,8 +2,6 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
-use crate::cli::{MicCommand, VolumeCommand};
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VolumeState {
     pub percent: u16,
@@ -13,53 +11,8 @@ pub struct VolumeState {
 pub struct WpctlBackend;
 
 impl WpctlBackend {
-    pub fn apply(&self, command: VolumeCommand, step: u16, limit: u16) -> Result<VolumeState> {
-        match command {
-            VolumeCommand::Up => self.run_set(&[
-                "set-volume",
-                "-l",
-                &format!("{:.2}", f64::from(limit) / 100.0),
-                "@DEFAULT_AUDIO_SINK@",
-                &format!("{step}%+"),
-            ])?,
-            VolumeCommand::Down => {
-                self.run_set(&["set-volume", "@DEFAULT_AUDIO_SINK@", &format!("{step}%-")])?
-            }
-            VolumeCommand::Mute => self.run_set(&["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"])?,
-            VolumeCommand::Show => {}
-        }
-        self.current()
-    }
-
     pub fn current(&self) -> Result<VolumeState> {
         self.current_target("@DEFAULT_AUDIO_SINK@")
-    }
-
-    pub fn apply_microphone(
-        &self,
-        command: MicCommand,
-        step: u16,
-        limit: u16,
-    ) -> Result<VolumeState> {
-        match command {
-            MicCommand::Up => self.run_set(&[
-                "set-volume",
-                "-l",
-                &format!("{:.2}", f64::from(limit) / 100.0),
-                "@DEFAULT_AUDIO_SOURCE@",
-                &format!("{step}%+"),
-            ])?,
-            MicCommand::Down => {
-                self.run_set(&["set-volume", "@DEFAULT_AUDIO_SOURCE@", &format!("{step}%-")])?
-            }
-            MicCommand::Mute => self.run_set(&["set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"])?,
-            MicCommand::Show => {}
-        }
-        self.current_target("@DEFAULT_AUDIO_SOURCE@")
-    }
-
-    pub fn current_microphone(&self) -> Result<VolumeState> {
-        self.current_target("@DEFAULT_AUDIO_SOURCE@")
     }
 
     fn current_target(&self, target: &str) -> Result<VolumeState> {
@@ -72,17 +25,6 @@ impl WpctlBackend {
         }
         let stdout = String::from_utf8(output.stdout).context("wpctl returned non-UTF-8 output")?;
         parse_wpctl_volume(&stdout)
-    }
-
-    fn run_set(&self, args: &[&str]) -> Result<()> {
-        let status = Command::new("wpctl")
-            .args(args)
-            .status()
-            .with_context(|| format!("failed to execute wpctl {}", args.join(" ")))?;
-        if !status.success() {
-            bail!("wpctl {} exited with {status}", args.join(" "));
-        }
-        Ok(())
     }
 }
 

@@ -95,14 +95,6 @@ fn emit(event: DockEvent) {
     }
 }
 
-pub(crate) fn notify_volume() {
-    emit(DockEvent::Volume);
-}
-
-pub(crate) fn notify_display_power() {
-    emit(DockEvent::DisplayPower);
-}
-
 #[derive(Template)]
 #[template(path = "external-dock.html")]
 struct DockTemplate;
@@ -704,6 +696,12 @@ async fn send_time(mut socket: WebSocket) {
 }
 
 fn start_event_sources() {
+    let volume_events = crate::native_observers::observe_volume();
+    thread::spawn(move || {
+        while volume_events.recv().is_ok() {
+            emit(DockEvent::Volume);
+        }
+    });
     let media_events = crate::native_observers::observe_media();
     thread::spawn(move || {
         while media_events.recv().is_ok() {

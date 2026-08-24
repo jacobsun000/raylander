@@ -10,9 +10,6 @@ axum = { version = "0.8", features = ["ws"] }
 chrono = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 gio = { version = "0.21", features = ["v2_80"] }
-gtk = { package = "gtk4", version = "0.10", features = ["v4_12"] }
-gtk4-layer-shell = "0.7.1"
-humantime = "2.3"
 rustfft = "6.4"
 libpulse-binding = "2.30"
 serde = { version = "1.0", features = ["derive"] }
