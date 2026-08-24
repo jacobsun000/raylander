@@ -26,18 +26,34 @@ pub struct MediaState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MediaAction {
-    PlayPause,
     Play,
     Pause,
     Next,
     Previous,
-    Stop,
-    SeekRelativeMicros(i64),
 }
 
 pub struct PlayerctlBackend;
 
 impl PlayerctlBackend {
+    pub fn load_artwork(&self, url: &str) -> Result<Option<Vec<u8>>> {
+        if let Some(path) = url.strip_prefix("file://") {
+            return std::fs::read(path)
+                .with_context(|| format!("failed to read media artwork {path}"))
+                .map(Some);
+        }
+        if url.starts_with("https://") || url.starts_with("http://") {
+            let output = Command::new("curl")
+                .args(["--fail", "--silent", "--max-time", "5", url])
+                .output()
+                .with_context(|| format!("failed to fetch media artwork {url}"))?;
+            if !output.status.success() {
+                bail!("media artwork request exited with {}", output.status);
+            }
+            return Ok(Some(output.stdout));
+        }
+        Ok(None)
+    }
+
     /// Returns the playing player, falling back to a paused and then stopped player.
     pub fn current(&self) -> Result<Option<MediaState>> {
         let output = Command::new("playerctl")
@@ -69,17 +85,10 @@ impl PlayerctlBackend {
             command.args(["--player", player]);
         }
         match action {
-            MediaAction::PlayPause => command.arg("play-pause"),
             MediaAction::Play => command.arg("play"),
             MediaAction::Pause => command.arg("pause"),
             MediaAction::Next => command.arg("next"),
             MediaAction::Previous => command.arg("previous"),
-            MediaAction::Stop => command.arg("stop"),
-            MediaAction::SeekRelativeMicros(offset) => {
-                let seconds = offset.unsigned_abs() as f64 / 1_000_000.0;
-                let direction = if offset < 0 { '-' } else { '+' };
-                command.args(["position", &format!("{seconds:.6}{direction}")])
-            }
         };
         let status = command
             .status()

@@ -17,10 +17,7 @@ pub struct InputMethodState {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InputMethodAction {
-    Activate,
-    Deactivate,
     Toggle,
-    Select(String),
 }
 
 pub struct Fcitx5Backend;
@@ -34,15 +31,7 @@ impl Fcitx5Backend {
 
     pub fn apply(&self, action: &InputMethodAction) -> Result<()> {
         match action {
-            InputMethodAction::Activate => run_fcitx(&["-o"]),
-            InputMethodAction::Deactivate => run_fcitx(&["-c"]),
             InputMethodAction::Toggle => run_fcitx(&["-t"]),
-            InputMethodAction::Select(name) => {
-                if name.trim().is_empty() || name.starts_with('-') {
-                    bail!("input method name must be non-empty and must not start with '-'");
-                }
-                run_fcitx(&["-s", name])
-            }
         }?;
         Ok(())
     }

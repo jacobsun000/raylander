@@ -15,6 +15,21 @@ impl WpctlBackend {
         self.current_target("@DEFAULT_AUDIO_SINK@")
     }
 
+    pub fn set_percent(&self, percent: u8) -> Result<()> {
+        let output = Command::new("wpctl")
+            .args(["set-volume", "@DEFAULT_AUDIO_SINK@", &format!("{percent}%")])
+            .output()
+            .context("failed to execute wpctl set-volume")?;
+        if !output.status.success() {
+            bail!(
+                "wpctl set-volume exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(())
+    }
+
     fn current_target(&self, target: &str) -> Result<VolumeState> {
         let output = Command::new("wpctl")
             .args(["get-volume", target])

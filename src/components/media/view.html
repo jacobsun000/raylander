@@ -1,0 +1,6 @@
+<section class="card media-card" id="media-card" onclick="openMedia()" role="button">
+<div class="media-ambient" id="media-ambient"></div>
+<img alt="" id="media-art" onerror="this.hidden=true" onload="this.hidden=false" src="/components/media/artwork"/>
+<div aria-hidden="true" class="media-empty" id="media-empty"><img alt="" src="/components/media/arch-logo.png"/></div><div class="media-copy hidden" id="media-copy"><p class="value truncate" id="media-title">Nothing playing</p><p class="truncate text-[9px] text-[#a6acb9]" id="media-artist"></p><div class="media-controls" onclick="event.stopPropagation()"><button aria-label="Previous" onclick="fetch('/components/media/action/previous',{method:'POST'})"><svg viewbox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 9 7V5z"></path></svg></button><button aria-label="Play" class="media-primary" onclick="fetch('/components/media/action/play',{method:'POST'})"><svg class="play-icon" viewbox="0 0 24 24"><path d="m8 5 11 7-11 7z"></path></svg><svg class="pause-icon" viewbox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"></path></svg></button><button aria-label="Next" onclick="fetch('/components/media/action/next',{method:'POST'})"><svg viewbox="0 0 24 24"><path d="m6 5 9 7-9 7zm10 0h2v14h-2z"></path></svg></button></div></div>
+</section>
+<div data-levels="0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0" hidden="" id="spectrum-data"></div>

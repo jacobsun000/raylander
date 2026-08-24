@@ -1,6 +1,7 @@
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
+use serde::Deserialize;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NetworkState {
@@ -17,10 +18,31 @@ pub struct ActiveConnection {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum NetworkAction {
-    SetWifi(bool),
-    ConnectKnown(String),
-    Disconnect(String),
+pub struct WifiNetwork {
+    pub active: bool,
+    pub ssid: String,
+    pub signal: u8,
+    pub security: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TailscaleStatus {
+    pub online: bool,
+    pub dns_name: String,
+}
+
+#[derive(Deserialize)]
+struct TailscaleWire {
+    #[serde(rename = "Self")]
+    own: TailscaleSelfWire,
+}
+
+#[derive(Deserialize)]
+struct TailscaleSelfWire {
+    #[serde(rename = "Online")]
+    online: bool,
+    #[serde(rename = "DNSName")]
+    dns_name: String,
 }
 
 pub struct NmcliBackend;
@@ -57,19 +79,40 @@ impl NmcliBackend {
         })
     }
 
-    pub fn apply(&self, action: &NetworkAction) -> Result<()> {
-        match action {
-            NetworkAction::SetWifi(enabled) => {
-                run_nmcli(&["radio", "wifi", if *enabled { "on" } else { "off" }])?;
-            }
-            NetworkAction::ConnectKnown(name) => {
-                run_nmcli(&["connection", "up", "id", name])?;
-            }
-            NetworkAction::Disconnect(name) => {
-                run_nmcli(&["connection", "down", "id", name])?;
-            }
+    pub fn wifi_networks(&self) -> Result<Vec<WifiNetwork>> {
+        let output = run_nmcli(&[
+            "--terse",
+            "--escape",
+            "yes",
+            "--fields",
+            "IN-USE,SSID,SIGNAL,SECURITY",
+            "device",
+            "wifi",
+            "list",
+            "--rescan",
+            "yes",
+        ])?;
+        parse_wifi_networks(&output)
+    }
+
+    pub fn tailscale_status(&self) -> Result<TailscaleStatus> {
+        let output = Command::new("tailscale")
+            .args(["status", "--json"])
+            .output()
+            .context("failed to execute tailscale status --json")?;
+        if !output.status.success() {
+            bail!(
+                "tailscale status exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
         }
-        Ok(())
+        let wire: TailscaleWire = serde_json::from_slice(&output.stdout)
+            .context("tailscale returned invalid status JSON")?;
+        Ok(TailscaleStatus {
+            online: wire.own.online,
+            dns_name: wire.own.dns_name.trim_end_matches('.').to_owned(),
+        })
     }
 }
 
@@ -113,6 +156,37 @@ pub fn parse_wifi_radio(output: &str) -> Result<bool> {
         "disabled" => Ok(false),
         value => bail!("unexpected nmcli Wi-Fi radio state: {value}"),
     }
+}
+
+pub fn parse_wifi_networks(output: &str) -> Result<Vec<WifiNetwork>> {
+    output
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| {
+            let fields = match split_escaped(line, ':') {
+                Ok(fields) => fields,
+                Err(error) => return Some(Err(error)),
+            };
+            if fields.len() != 4 {
+                return Some(Err(anyhow::anyhow!(
+                    "expected four fields in nmcli Wi-Fi list output"
+                )));
+            }
+            if fields[1].is_empty() {
+                return None;
+            }
+            let signal = match fields[2].parse::<u8>() {
+                Ok(signal) if signal <= 100 => signal,
+                _ => return Some(Err(anyhow::anyhow!("invalid Wi-Fi signal"))),
+            };
+            Some(Ok(WifiNetwork {
+                active: fields[0] == "*" || fields[0] == "yes",
+                ssid: fields[1].clone(),
+                signal,
+                security: fields[3].clone(),
+            }))
+        })
+        .collect()
 }
 
 pub fn parse_active_wifi_signal(output: &str) -> Result<Option<u8>> {
@@ -186,6 +260,38 @@ mod tests {
     fn rejects_malformed_connection_output() {
         assert!(parse_active_connections("wifi:missing-device").is_err());
         assert!(parse_active_connections("wifi:name:device\\").is_err());
+    }
+
+    #[test]
+    fn parses_wifi_network_list() {
+        assert_eq!(
+            parse_wifi_networks("*:Cafe\\: Upstairs:87:WPA2\n:Guest:42:\n").unwrap(),
+            vec![
+                WifiNetwork {
+                    active: true,
+                    ssid: "Cafe: Upstairs".into(),
+                    signal: 87,
+                    security: "WPA2".into(),
+                },
+                WifiNetwork {
+                    active: false,
+                    ssid: "Guest".into(),
+                    signal: 42,
+                    security: String::new(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_wifi_network_rows() {
+        assert!(parse_wifi_networks("*:missing:fields").is_err());
+        assert!(parse_wifi_networks("*:Cafe:101:WPA2").is_err());
+    }
+
+    #[test]
+    fn ignores_hidden_wifi_networks() {
+        assert!(parse_wifi_networks("::50:WPA2").unwrap().is_empty());
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
+use serde::Deserialize;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DdcDisplay {
@@ -25,9 +26,32 @@ impl Brightness {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HyprMonitor {
+    dpms_status: bool,
+}
+
 pub struct DdcutilBackend;
 
 impl DdcutilBackend {
+    pub fn display_power_enabled(&self) -> Result<bool> {
+        let output = Command::new("hyprctl")
+            .args(["-j", "monitors"])
+            .output()
+            .context("failed to execute hyprctl -j monitors")?;
+        if !output.status.success() {
+            bail!(
+                "hyprctl monitors exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        let monitors: Vec<HyprMonitor> = serde_json::from_slice(&output.stdout)
+            .context("hyprctl monitors returned invalid JSON")?;
+        Ok(monitors.iter().any(|monitor| monitor.dpms_status))
+    }
+
     pub fn displays(&self) -> Result<Vec<DdcDisplay>> {
         let output = run_ddcutil(&["detect", "--brief"])?;
         parse_ddcutil_detect(&output)

@@ -2,7 +2,18 @@
 enabled = true
 bind-address = "0.0.0.0"
 port = 8030
-weather-latitude = "30.2672"
-weather-longitude = "-97.7431"
+
+[components.dock-layout]
+columns = 2
+# Omit order to use the default component order.
+order = []
+
+[components.weather]
+enabled = true
+latitude = "30.2672"
+longitude = "-97.7431"
+
+[components.calendar-events]
+enabled = true
 # Add each calendar's Google Calendar "Secret address in iCal format" URL.
-google-calendar-urls = []
+urls = []

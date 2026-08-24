@@ -2,34 +2,57 @@
 
 ## Project Structure & Module Organization
 
-Raylander is a Rust 2024 GTK application. `src/main.rs` is the executable entry point, while `src/lib.rs` exposes the application runner. Keep responsibilities separated across the existing modules: `app.rs` manages lifecycle and command dispatch, `audio.rs` integrates with `wpctl` and `pactl`, `config.rs` handles configuration and validation, `cli.rs` defines commands, and `volume_osd.rs` owns the GTK layer-shell UI. Default styling lives in `assets/default.css`; user-facing configuration and theme samples live in `examples/`.
+Raylander is a Rust 2024 server for the external dock web interface. It does not provide GTK, layer-shell, or desktop-widget UI.
 
-New desktop components should follow the same pattern: define typed commands, isolate system integration in an adapter, keep GTK state within the component, and place settings under `[components.<name>]`.
+`src/main.rs` is the executable entry point, `src/lib.rs` exposes the runner, `src/app.rs` owns daemon lifecycle, `src/cli.rs` defines the `daemon` command, and `src/config.rs` handles typed configuration and validation. `src/web_server.rs` is a small facade over the dock server.
+
+Each component lives directly under `src/components/<id>/` and owns its HTML, overlays, JavaScript, routes, state, observers, rendering, configuration, and backend adapters. Keep adapters under their owning component rather than adding component-specific modules at `src/*.rs` or nesting components below `src/components/dock/`. The `src/components/dock/` directory contains only shared dock composition, Axum/Tokio lifecycle, shell integration, invalidation transport, and framework assets.
+
+The central layout in `src/components/dock/mod.rs` owns component ordering and placement. Components expose only their grid size and must not encode rows, columns, slots, or ordering.
+
+Web styling and framework assets live under `assets/web/`; the page shell lives in `templates/external-dock.html`. User-facing configuration samples live in `examples/`. Android external-dock integration lives under `android/`.
 
 ## Build, Test, and Development Commands
 
-- `cargo build` compiles a debug build for local development.
-- `cargo build --release` produces the optimized binary.
-- `cargo run -- daemon` starts Raylander from the working tree.
+- `cargo build` compiles a debug build.
+- `cargo build --release` produces the release server.
+- `cargo run -- daemon` starts the external dock server from the working tree.
 - `cargo test` runs all unit tests.
-- `cargo fmt --all -- --check` verifies standard Rust formatting.
-- `cargo clippy --all-targets --all-features -- -D warnings` treats lint warnings as errors.
-- `cargo install --path . --locked` installs the exact dependency versions in `Cargo.lock`.
-- `cargo run -- demo -t 5s` displays every component preview for five seconds and then exits.
-- `cargo run -- demo --output /tmp/raylander-demo.png` renders the preview to a PNG without displaying it.
+- `cargo fmt --all -- --check` verifies Rust formatting.
+- `cargo clippy --all-targets --all-features -- -D warnings` treats warnings as errors.
+- `cargo install --path . --locked` installs the locked dependency set.
+- `npm install` installs web asset tooling.
+- `npm run build:css` regenerates the committed dock stylesheet after CSS/template changes.
+- `./scripts/dev.sh` runs the development hot-reload workflow when `cargo-watch` is installed.
 
-Building requires Rust 1.90+, GTK 4.12+, and gtk4-layer-shell. Runtime audio behavior also requires `wpctl` and `pactl`.
+Building requires Rust 1.90+. Runtime features use system services and commands such as `wpctl`, `pactl`, `playerctl`, `nmcli`, `tailscale`, `hyprctl`, `fcitx5-remote`, `ddcutil`, and BlueZ where their corresponding components are enabled.
 
-## Coding Style & Naming Conventions
+## Coding Style & Component Boundaries
 
-Use `rustfmt` defaults (four-space indentation) and keep code Clippy-clean. Follow Rust conventions: `snake_case` for modules, functions, and variables; `PascalCase` for types and traits; and `SCREAMING_SNAKE_CASE` for constants. Prefer typed command/state boundaries over stringly typed interfaces. Add contextual errors with `anyhow` where failures cross system or process boundaries.
+Use `rustfmt` defaults and keep the project Clippy-clean. Follow Rust naming conventions. Prefer typed state, commands, configuration, invalidation keys, and backend results over stringly typed interfaces. Add contextual `anyhow` errors at process, filesystem, network, D-Bus, and parsing boundaries.
+
+Adding or changing a component should not require component-specific logic in `server.rs`, the page shell, or shared JavaScript. Use `Component::routes()` for namespaced routes and component-owned assets. Background observers must use the shared shutdown token, return tracked lifecycle handles, and terminate cleanly when the server stops.
+
+Do not reintroduce GTK/GIO application lifecycle, layer-shell windows, desktop widgets, OSDs, sidebars, preview commands, or desktop-only component infrastructure.
+
+## Configuration Guidelines
+
+Place component settings under `[components.<id>]`. Keep bind address and port under `[components.external-dock]`, and layout columns/order under `[components.dock-layout]`. Validate unknown, duplicate, and disabled component references. Update `examples/config.toml` whenever the public configuration shape changes.
 
 ## Testing Guidelines
 
-Place focused unit tests in a `#[cfg(test)] mod tests` beside the code under test, following existing examples in `cli.rs`, `audio.rs`, and `config.rs`. Name tests after observable behavior, such as `parses_volume_command`. Run `cargo test` before submitting changes. There is no fixed coverage threshold; prioritize parsing, validation, state transitions, and failure cases.
+Place focused unit tests beside the code under test. Prioritize parsing, validation, renderer output, route behavior, state transitions, observer invalidation, backend failures, component registration, layout validation, and shutdown behavior. Backend logic should be testable without live desktop services where practical.
 
-For visual changes, render `/tmp/raylander-demo.png` with `cargo run -- demo --output /tmp/raylander-demo.png`, inspect the resulting image, and compare spacing, color roles, typography, borders, elevation, and component state against the Atlas Desktop UI System. Also run `cargo run -- demo -t 5s` in a Wayland session to verify placement, scaling, transitions, and compositor behavior that a still image cannot cover. Repeat both checks in `light` and `dark` color schemes when shared tokens or theme CSS changes.
+For web UI changes, inspect the external dock in both supported color schemes and verify the Android/browser runtime for spacing, typography, color roles, scaling, dialogs, WebSocket updates, and touch behavior. Regenerate CSS when required.
+
+Before submitting changes, run:
+
+```sh
+cargo test
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+```
 
 ## Commit & Pull Request Guidelines
 
-Use Conventional Commits, for example `feat: add brightness OSD` or `fix(audio): handle missing default sink`. Keep commits focused. Pull requests should explain the user-visible change, note configuration or dependency impacts, link relevant issues, and include screenshots or recordings for UI changes. Report the commands used to validate the change.
+Use Conventional Commits, for example `feat(weather): add configurable locations` or `fix(media): handle missing player`. Keep commits focused. Pull requests should explain user-visible behavior, configuration and dependency impacts, linked issues, and validation commands. Include screenshots or recordings for visual changes.
