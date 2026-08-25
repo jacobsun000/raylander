@@ -5,7 +5,8 @@ port = 8030
 
 [components.dock-layout]
 columns = 2
-# Omit order to use the default component order.
+# Omit order to use the platform default. Windows omits the unsupported
+# packages and agents components; packages remains available on Linux.
 order = []
 
 [components.weather]

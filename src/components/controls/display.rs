@@ -1,6 +1,9 @@
+#[cfg(target_os = "linux")]
 use std::process::Command;
 
+#[cfg(target_os = "linux")]
 use anyhow::{Context, Result, bail};
+#[cfg(target_os = "linux")]
 use serde::Deserialize;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,6 +29,7 @@ impl Brightness {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HyprMonitor {
@@ -34,6 +38,7 @@ struct HyprMonitor {
 
 pub struct DdcutilBackend;
 
+#[cfg(target_os = "linux")]
 impl DdcutilBackend {
     pub fn display_power_enabled(&self) -> Result<bool> {
         let output = Command::new("hyprctl")
@@ -84,6 +89,147 @@ impl DdcutilBackend {
     }
 }
 
+#[cfg(target_os = "windows")]
+mod windows_backend {
+    use anyhow::{Context, Result, bail};
+    use windows::Win32::{
+        Devices::Display::{
+            DestroyPhysicalMonitors, GetMonitorBrightness, GetNumberOfPhysicalMonitorsFromHMONITOR,
+            GetPhysicalMonitorsFromHMONITOR, PHYSICAL_MONITOR, SetMonitorBrightness,
+        },
+        Graphics::Gdi::{MONITOR_DEFAULTTOPRIMARY, MonitorFromWindow},
+    };
+
+    use super::{Brightness, DdcDisplay, DdcutilBackend};
+
+    struct Monitors(Vec<PHYSICAL_MONITOR>);
+
+    impl Drop for Monitors {
+        fn drop(&mut self) {
+            if !self.0.is_empty() {
+                unsafe {
+                    let _ = DestroyPhysicalMonitors(&self.0);
+                }
+            }
+        }
+    }
+
+    fn monitors() -> Result<Monitors> {
+        unsafe {
+            let monitor = MonitorFromWindow(Default::default(), MONITOR_DEFAULTTOPRIMARY);
+            let mut count = 0;
+            GetNumberOfPhysicalMonitorsFromHMONITOR(monitor, &mut count)
+                .context("display does not expose physical monitor controls")?;
+            if count == 0 {
+                bail!("display does not expose a physical monitor");
+            }
+            let mut values = vec![PHYSICAL_MONITOR::default(); count as usize];
+            GetPhysicalMonitorsFromHMONITOR(monitor, &mut values)
+                .context("failed to open physical monitors")?;
+            Ok(Monitors(values))
+        }
+    }
+
+    impl DdcutilBackend {
+        pub fn display_power_enabled(&self) -> Result<bool> {
+            // Windows has no reliable, non-disruptive equivalent to Hyprland DPMS state.
+            monitors().map(|values| !values.0.is_empty())
+        }
+
+        pub fn displays(&self) -> Result<Vec<DdcDisplay>> {
+            let values = monitors()?;
+            Ok(values
+                .0
+                .iter()
+                .enumerate()
+                .map(|(index, monitor)| DdcDisplay {
+                    number: index as u32,
+                    connector: None,
+                    bus: None,
+                    model: Some({
+                        let description = monitor.szPhysicalMonitorDescription;
+                        String::from_utf16_lossy(&description)
+                            .trim_end_matches('\0')
+                            .to_owned()
+                    }),
+                })
+                .collect())
+        }
+
+        pub fn brightness(&self, display: u32) -> Result<Brightness> {
+            let values = monitors()?;
+            let monitor = values
+                .0
+                .get(display as usize)
+                .context("physical monitor no longer exists")?;
+            let (mut minimum, mut current, mut maximum) = (0, 0, 0);
+            if unsafe {
+                GetMonitorBrightness(
+                    monitor.hPhysicalMonitor,
+                    &mut minimum,
+                    &mut current,
+                    &mut maximum,
+                )
+            } == 0
+            {
+                return Err(windows::core::Error::from_thread())
+                    .context("monitor does not support brightness control");
+            }
+            let range = maximum.saturating_sub(minimum);
+            if range == 0 {
+                bail!("monitor returned an invalid brightness range");
+            }
+            Ok(Brightness {
+                current: current.saturating_sub(minimum).min(u32::from(u16::MAX)) as u16,
+                maximum: range.min(u32::from(u16::MAX)) as u16,
+            })
+        }
+
+        pub fn all_brightness(&self) -> Result<Vec<(DdcDisplay, Brightness)>> {
+            Ok(self
+                .displays()?
+                .into_iter()
+                .filter_map(|display| {
+                    self.brightness(display.number)
+                        .ok()
+                        .map(|value| (display, value))
+                })
+                .collect())
+        }
+
+        pub fn set_brightness(&self, display: u32, percent: u8) -> Result<()> {
+            if percent > 100 {
+                bail!("brightness must be between 0 and 100");
+            }
+            let values = monitors()?;
+            let monitor = values
+                .0
+                .get(display as usize)
+                .context("physical monitor no longer exists")?;
+            let (mut minimum, mut current, mut maximum) = (0, 0, 0);
+            if unsafe {
+                GetMonitorBrightness(
+                    monitor.hPhysicalMonitor,
+                    &mut minimum,
+                    &mut current,
+                    &mut maximum,
+                )
+            } == 0
+            {
+                return Err(windows::core::Error::from_thread())
+                    .context("monitor does not support brightness control");
+            }
+            let value = minimum + maximum.saturating_sub(minimum) * u32::from(percent) / 100;
+            if unsafe { SetMonitorBrightness(monitor.hPhysicalMonitor, value) } == 0 {
+                return Err(windows::core::Error::from_thread())
+                    .context("failed to set monitor brightness");
+            }
+            Ok(())
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn run_ddcutil(args: &[&str]) -> Result<String> {
     let output = Command::new("ddcutil")
         .args(args)
@@ -100,6 +246,7 @@ fn run_ddcutil(args: &[&str]) -> Result<String> {
     String::from_utf8(output.stdout).context("ddcutil returned non-UTF-8 output")
 }
 
+#[cfg(target_os = "linux")]
 pub fn parse_ddcutil_detect(output: &str) -> Result<Vec<DdcDisplay>> {
     let mut displays = Vec::new();
     let mut current: Option<DdcDisplay> = None;
@@ -140,10 +287,12 @@ pub fn parse_ddcutil_detect(output: &str) -> Result<Vec<DdcDisplay>> {
     Ok(displays)
 }
 
+#[cfg(target_os = "linux")]
 fn field<'a>(line: &'a str, name: &str) -> Option<&'a str> {
     line.strip_prefix(name)?.strip_prefix(':').map(str::trim)
 }
 
+#[cfg(target_os = "linux")]
 pub fn parse_ddcutil_brightness(output: &str) -> Result<Brightness> {
     // Current ddcutil brief output is `VCP 10 C <current> <maximum>`.
     let fields: Vec<_> = output.split_whitespace().collect();
@@ -168,7 +317,7 @@ pub fn parse_ddcutil_brightness(output: &str) -> Result<Brightness> {
     Ok(Brightness { current, maximum })
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 

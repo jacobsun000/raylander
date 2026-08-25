@@ -1,8 +1,13 @@
+#[cfg(target_os = "linux")]
 use std::process::Command;
 
-use anyhow::{Context, Result, bail};
+#[cfg(target_os = "linux")]
+use anyhow::bail;
+use anyhow::{Context, Result};
 
+#[cfg(target_os = "linux")]
 const FIELD_SEPARATOR: char = '\u{1f}';
+#[cfg(target_os = "linux")]
 const PLAYER_FORMAT: &str = "{{playerName}}\u{1f}{{status}}\u{1f}{{xesam:title}}\u{1f}{{xesam:artist}}\u{1f}{{xesam:album}}\u{1f}{{mpris:artUrl}}\u{1f}{{position}}\u{1f}{{mpris:length}}";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,6 +40,7 @@ pub enum MediaAction {
 pub struct PlayerctlBackend;
 
 impl PlayerctlBackend {
+    #[cfg(target_os = "linux")]
     pub fn load_artwork(&self, url: &str) -> Result<Option<Vec<u8>>> {
         if let Some(path) = url.strip_prefix("file://") {
             return std::fs::read(path)
@@ -42,19 +48,25 @@ impl PlayerctlBackend {
                 .map(Some);
         }
         if url.starts_with("https://") || url.starts_with("http://") {
-            let output = Command::new("curl")
-                .args(["--fail", "--silent", "--max-time", "5", url])
-                .output()
-                .with_context(|| format!("failed to fetch media artwork {url}"))?;
-            if !output.status.success() {
-                bail!("media artwork request exited with {}", output.status);
-            }
-            return Ok(Some(output.stdout));
+            let response = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .build()
+                .context("failed to build media artwork client")?
+                .get(url)
+                .send()
+                .with_context(|| format!("failed to fetch media artwork {url}"))?
+                .error_for_status()
+                .with_context(|| format!("media artwork request failed for {url}"))?;
+            return response
+                .bytes()
+                .map(|bytes| Some(bytes.to_vec()))
+                .context("failed to read media artwork response");
         }
         Ok(None)
     }
 
     /// Returns the playing player, falling back to a paused and then stopped player.
+    #[cfg(target_os = "linux")]
     pub fn current(&self) -> Result<Option<MediaState>> {
         let output = Command::new("playerctl")
             .args(["--all-players", "metadata", "--format", PLAYER_FORMAT])
@@ -79,6 +91,7 @@ impl PlayerctlBackend {
         Ok(select_current_player(&parse_playerctl_metadata(&stdout)?).cloned())
     }
 
+    #[cfg(target_os = "linux")]
     pub fn apply(&self, player: Option<&str>, action: MediaAction) -> Result<()> {
         let mut command = Command::new("playerctl");
         if let Some(player) = player {
@@ -98,8 +111,91 @@ impl PlayerctlBackend {
         }
         Ok(())
     }
+
+    #[cfg(target_os = "windows")]
+    pub fn current(&self) -> Result<Option<MediaState>> {
+        use windows::Media::Control::{
+            GlobalSystemMediaTransportControlsSessionManager as Manager,
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
+        };
+
+        let manager = Manager::RequestAsync()?.join()?;
+        let Some(session) = manager.GetCurrentSession().ok() else {
+            return Ok(None);
+        };
+        let properties = session.TryGetMediaPropertiesAsync()?.join()?;
+        let playback = session.GetPlaybackInfo()?;
+        let timeline = session.GetTimelineProperties().ok();
+        let player = session.SourceAppUserModelId()?.to_string_lossy();
+        let title = properties.Title()?.to_string_lossy();
+        let artist = properties.Artist()?.to_string_lossy();
+        let album = properties.AlbumTitle()?.to_string_lossy();
+        let has_thumbnail = properties.Thumbnail().is_ok();
+        let status = match playback.PlaybackStatus()? {
+            Status::Playing => PlaybackStatus::Playing,
+            Status::Paused => PlaybackStatus::Paused,
+            _ => PlaybackStatus::Stopped,
+        };
+        Ok(Some(MediaState {
+            artwork_url: has_thumbnail.then(|| format!("gsmtc://{player}")),
+            player,
+            status,
+            title,
+            artists: (!artist.is_empty()).then_some(artist).into_iter().collect(),
+            album: (!album.is_empty()).then_some(album),
+            position_micros: timeline
+                .as_ref()
+                .map(|value| (value.Position().unwrap_or_default().Duration.max(0) as u64) / 10),
+            duration_micros: timeline
+                .as_ref()
+                .map(|value| (value.EndTime().unwrap_or_default().Duration.max(0) as u64) / 10),
+        }))
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn apply(&self, _player: Option<&str>, action: MediaAction) -> Result<()> {
+        use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager as Manager;
+
+        let manager = Manager::RequestAsync()?.join()?;
+        let session = manager
+            .GetCurrentSession()
+            .context("no active Windows media session")?;
+        match action {
+            MediaAction::Play => session.TryPlayAsync()?.join()?,
+            MediaAction::Pause => session.TryPauseAsync()?.join()?,
+            MediaAction::Next => session.TrySkipNextAsync()?.join()?,
+            MediaAction::Previous => session.TrySkipPreviousAsync()?.join()?,
+        };
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn load_artwork(&self, url: &str) -> Result<Option<Vec<u8>>> {
+        use windows::{
+            Media::Control::GlobalSystemMediaTransportControlsSessionManager as Manager,
+            Storage::Streams::DataReader,
+        };
+
+        if !url.starts_with("gsmtc://") {
+            return Ok(None);
+        }
+        let manager = Manager::RequestAsync()?.join()?;
+        let session = manager
+            .GetCurrentSession()
+            .context("no active Windows media session")?;
+        let properties = session.TryGetMediaPropertiesAsync()?.join()?;
+        let stream = properties.Thumbnail()?.OpenReadAsync()?.join()?;
+        let size = stream.Size()?;
+        let size = u32::try_from(size).context("media thumbnail is too large")?;
+        let reader = DataReader::CreateDataReader(&stream)?;
+        reader.LoadAsync(size)?.join()?;
+        let mut bytes = vec![0; size as usize];
+        reader.ReadBytes(&mut bytes)?;
+        Ok(Some(bytes))
+    }
 }
 
+#[cfg(target_os = "linux")]
 pub fn parse_playerctl_metadata(output: &str) -> Result<Vec<MediaState>> {
     output
         .lines()
@@ -108,6 +204,7 @@ pub fn parse_playerctl_metadata(output: &str) -> Result<Vec<MediaState>> {
         .collect()
 }
 
+#[cfg(target_os = "linux")]
 pub fn select_current_player(players: &[MediaState]) -> Option<&MediaState> {
     [
         PlaybackStatus::Playing,
@@ -118,6 +215,7 @@ pub fn select_current_player(players: &[MediaState]) -> Option<&MediaState> {
     .find_map(|status| players.iter().find(|player| player.status == status))
 }
 
+#[cfg(target_os = "linux")]
 fn parse_player(line: &str) -> Result<MediaState> {
     let fields: Vec<_> = line.split(FIELD_SEPARATOR).collect();
     if fields.len() != 8 {
@@ -152,10 +250,12 @@ fn parse_player(line: &str) -> Result<MediaState> {
     })
 }
 
+#[cfg(target_os = "linux")]
 fn nonempty(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_owned())
 }
 
+#[cfg(target_os = "linux")]
 fn parse_optional_u64(value: &str, name: &str) -> Result<Option<u64>> {
     if value.is_empty() {
         return Ok(None);
@@ -166,7 +266,7 @@ fn parse_optional_u64(value: &str, name: &str) -> Result<Option<u64>> {
         .with_context(|| format!("playerctl returned invalid {name} {value:?}"))
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 

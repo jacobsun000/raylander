@@ -98,17 +98,11 @@ pub(crate) fn update_fragment() -> String {
 }
 
 fn brightness_fragment() -> Option<String> {
-    let (display, value) =
-        DdcutilBackend
-            .all_brightness()
-            .ok()?
-            .into_iter()
-            .find(|(display, _)| {
-                display
-                    .connector
-                    .as_deref()
-                    .is_some_and(|connector| connector.ends_with("DP-2"))
-            })?;
+    let (display, value) = DdcutilBackend
+        .all_brightness()
+        .ok()?
+        .into_iter()
+        .find(|(display, _)| is_dock_display(display))?;
     remember_display(display.number);
     let percent = value.percent();
     let mut html = String::new();
@@ -186,8 +180,15 @@ async fn set_brightness(Path(percent): Path<u8>) -> StatusCode {
 }
 
 fn is_dock_display(display: &crate::components::controls::display::DdcDisplay) -> bool {
-    display
+    #[cfg(target_os = "linux")]
+    return display
         .connector
         .as_deref()
-        .is_some_and(|connector| connector.ends_with("DP-2"))
+        .is_some_and(|connector| connector.ends_with("DP-2"));
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = display;
+        true
+    }
 }

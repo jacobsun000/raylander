@@ -26,9 +26,13 @@ use self::{
 };
 use super::dock_component;
 
+#[cfg_attr(target_os = "windows", path = "bluetooth_windows.rs")]
 pub(crate) mod bluetooth;
+#[cfg_attr(target_os = "windows", path = "inhibitor_windows.rs")]
 mod inhibitor;
+#[cfg_attr(target_os = "windows", path = "input_method_windows.rs")]
 pub(crate) mod input_method;
+#[cfg_attr(target_os = "windows", path = "network_windows.rs")]
 pub(crate) mod network;
 
 dock_component!(Connectivity, "connectivity", GridSize::ONE_BY_ONE, routes());
@@ -62,7 +66,7 @@ pub(crate) fn observe_bluetooth(
         .spawn(move || {
             let mut previous = None;
             while !shutdown.load(Ordering::Relaxed) {
-                let current = zbus::block_on(BluetoothBackend.state()).ok();
+                let current = bluetooth_state_blocking().ok();
                 if current != previous {
                     previous = current;
                     on_change();
@@ -71,6 +75,21 @@ pub(crate) fn observe_bluetooth(
             }
         })
         .expect("failed to start Bluetooth observer")
+}
+
+fn bluetooth_state_blocking() -> anyhow::Result<BluetoothState> {
+    #[cfg(target_os = "linux")]
+    {
+        zbus::block_on(BluetoothBackend.state())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("failed to create Bluetooth query runtime")?
+            .block_on(BluetoothBackend.state())
+    }
 }
 
 pub(crate) fn observe_input_method(
@@ -293,7 +312,7 @@ pub(crate) fn invalidate() {
 
 pub(crate) fn update_fragment() -> String {
     cached_fragment(&FRAGMENT, Duration::from_millis(400), || {
-        let state = zbus::block_on(BluetoothBackend.state()).ok()?;
+        let state = bluetooth_state_blocking().ok()?;
         let connected_devices = connected_bluetooth_devices(&state);
         let bluetooth_class = if connected_devices.is_empty() {
             match &state.availability {

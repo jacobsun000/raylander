@@ -8,15 +8,18 @@ use std::{collections::HashSet, sync::Arc};
 use anyhow::{Result, bail};
 use axum::Router;
 
+#[cfg(target_os = "linux")]
 pub(crate) mod agents;
 pub(crate) mod calendar_events;
 pub(crate) mod clock;
 pub(crate) mod connectivity;
 pub(crate) mod controls;
 pub mod dock;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) mod focus;
 pub(crate) mod media;
 pub(crate) mod native_observers;
+#[cfg(target_os = "linux")]
 pub(crate) mod packages;
 pub(crate) mod system_status;
 pub(crate) mod weather;

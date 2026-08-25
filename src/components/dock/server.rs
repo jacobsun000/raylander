@@ -20,10 +20,11 @@ use axum::{
 };
 use tokio::sync::{broadcast, oneshot};
 
+#[cfg(target_os = "linux")]
+use crate::components::{agents, packages};
 use crate::{
     components::{
-        agents, calendar_events, connectivity, controls, dock, focus, media, packages,
-        system_status, weather,
+        calendar_events, connectivity, controls, dock, focus, media, system_status, weather,
     },
     config::ComponentsConfig,
 };
@@ -292,7 +293,8 @@ fn start_component_tasks(context: ComponentContext) -> Vec<JoinHandle<()>> {
         move || context.invalidate(key, render)
     };
     let shutdown = &context.shutdown;
-    vec![
+    #[cfg_attr(target_os = "windows", allow(unused_mut))]
+    let mut tasks = vec![
         controls::observe_volume(
             Arc::clone(shutdown),
             notify("controls/volume", controls::volume_fragment, &context),
@@ -325,10 +327,6 @@ fn start_component_tasks(context: ComponentContext) -> Vec<JoinHandle<()>> {
                 &context,
             ),
         ),
-        agents::observe(
-            Arc::clone(shutdown),
-            notify("agents/main", agents::update_fragment, &context),
-        ),
         calendar_events::observe(
             Arc::clone(shutdown),
             notify(
@@ -336,10 +334,6 @@ fn start_component_tasks(context: ComponentContext) -> Vec<JoinHandle<()>> {
                 calendar_events::update_fragment,
                 &context,
             ),
-        ),
-        packages::observe(
-            Arc::clone(shutdown),
-            notify("packages/main", packages::update_fragment, &context),
         ),
         system_status::observe(
             Arc::clone(shutdown),
@@ -353,11 +347,23 @@ fn start_component_tasks(context: ComponentContext) -> Vec<JoinHandle<()>> {
             Arc::clone(shutdown),
             notify("media/spectrum", media::spectrum_fragment, &context),
         ),
-    ]
+    ];
+    #[cfg(target_os = "linux")]
+    tasks.extend([
+        agents::observe(
+            Arc::clone(shutdown),
+            notify("agents/main", agents::update_fragment, &context),
+        ),
+        packages::observe(
+            Arc::clone(shutdown),
+            notify("packages/main", packages::update_fragment, &context),
+        ),
+    ]);
+    tasks
 }
 
-fn initial_invalidations() -> [Invalidation; 7] {
-    [
+fn initial_invalidations() -> Vec<Invalidation> {
+    vec![
         Invalidation {
             key: "controls/volume",
             render: controls::volume_fragment,
@@ -378,6 +384,7 @@ fn initial_invalidations() -> [Invalidation; 7] {
             key: "controls/display-power",
             render: controls::update_fragment,
         },
+        #[cfg(target_os = "linux")]
         Invalidation {
             key: "agents/main",
             render: agents::update_fragment,
@@ -402,11 +409,14 @@ fn javascript(source: &'static str) -> impl IntoResponse {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
     use std::time::Instant;
 
+    #[cfg(target_os = "linux")]
+    use crate::components::connectivity::bluetooth::BluetoothBackend;
     use crate::components::connectivity::{
         CONTROLLER_GLYPH, TRACKPAD_GLYPH,
-        bluetooth::{BluetoothAvailability, BluetoothBackend, BluetoothDevice, BluetoothState},
+        bluetooth::{BluetoothAvailability, BluetoothDevice, BluetoothState},
         bluetooth_device_control, connected_bluetooth_devices,
     };
 
@@ -490,6 +500,7 @@ mod tests {
     }
 
     /// Run with `cargo test component_load_benchmark -- --ignored --nocapture`.
+    #[cfg(target_os = "linux")]
     #[test]
     #[ignore = "queries live desktop services and the network"]
     fn component_load_benchmark() {

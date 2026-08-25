@@ -1,17 +1,24 @@
 use std::{
-    io::Read,
-    process::{Command, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
+#[cfg(target_os = "linux")]
+use std::{
+    io::Read,
+    process::{Command, Stdio},
+    time::Instant,
+};
+
+#[cfg(target_os = "linux")]
 use rustfft::{FftPlanner, num_complex::Complex};
 
+#[cfg(target_os = "linux")]
 const FFT_SIZE: usize = 2048;
 const BANDS: usize = 16;
 
@@ -24,6 +31,7 @@ pub fn observe(active: Arc<AtomicBool>) -> mpsc::Receiver<[u8; BANDS]> {
     receiver
 }
 
+#[cfg(target_os = "linux")]
 fn capture(sender: mpsc::SyncSender<[u8; BANDS]>, active: Arc<AtomicBool>) {
     loop {
         if !active.load(Ordering::Relaxed) {
@@ -84,6 +92,7 @@ fn capture(sender: mpsc::SyncSender<[u8; BANDS]>, active: Arc<AtomicBool>) {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn default_monitor() -> Option<String> {
     let output = Command::new("pactl")
         .arg("get-default-sink")
@@ -95,6 +104,23 @@ fn default_monitor() -> Option<String> {
         .then(|| format!("{}.monitor", String::from_utf8_lossy(&output.stdout).trim()))
 }
 
+#[cfg(target_os = "windows")]
+fn capture(sender: mpsc::SyncSender<[u8; BANDS]>, active: Arc<AtomicBool>) {
+    let mut emitted = false;
+    loop {
+        if active.load(Ordering::Relaxed) {
+            if !emitted {
+                let _ = sender.try_send([0; BANDS]);
+                emitted = true;
+            }
+        } else {
+            emitted = false;
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn spectrum(samples: &[Complex<f32>], smooth: &mut [f32; BANDS]) -> [u8; BANDS] {
     let mut result = [0_u8; BANDS];
     let min_bin = 3_f32;

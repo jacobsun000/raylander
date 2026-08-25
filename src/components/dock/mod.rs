@@ -10,12 +10,15 @@ use anyhow::Result;
 use crate::config::ComponentsConfig;
 
 use super::{
-    ComponentId, ComponentRegistry, Layout, agents, calendar_events, clock, connectivity, controls,
-    focus, media, packages, system_status, weather,
+    ComponentId, ComponentRegistry, Layout, calendar_events, clock, connectivity, controls, focus,
+    media, system_status, weather,
 };
+#[cfg(target_os = "linux")]
+use super::{agents, packages};
 
 pub(crate) mod server;
 
+#[cfg(target_os = "linux")]
 const ORDER: [ComponentId; 10] = [
     ComponentId::new("clock"),
     ComponentId::new("controls"),
@@ -26,6 +29,18 @@ const ORDER: [ComponentId; 10] = [
     ComponentId::new("system-status"),
     ComponentId::new("weather"),
     ComponentId::new("agents"),
+    ComponentId::new("calendar-events"),
+];
+
+#[cfg(target_os = "windows")]
+const ORDER: [ComponentId; 8] = [
+    ComponentId::new("clock"),
+    ComponentId::new("controls"),
+    ComponentId::new("connectivity"),
+    ComponentId::new("focus"),
+    ComponentId::new("media"),
+    ComponentId::new("system-status"),
+    ComponentId::new("weather"),
     ComponentId::new("calendar-events"),
 ];
 
@@ -73,21 +88,9 @@ fn build_settings(config: &ComponentsConfig) -> Result<DockSettings> {
         config.dock_layout.columns > 0,
         "dock layout columns must be greater than zero"
     );
-    let toggles = [
-        (ORDER[0], config.clock.enabled),
-        (ORDER[1], config.controls.enabled),
-        (ORDER[2], config.connectivity.enabled),
-        (ORDER[3], config.packages.enabled),
-        (ORDER[4], config.focus.enabled),
-        (ORDER[5], config.media.enabled),
-        (ORDER[6], config.system_status.enabled),
-        (ORDER[7], config.weather.enabled),
-        (ORDER[8], config.agents.enabled),
-        (ORDER[9], config.calendar_events.enabled),
-    ];
-    let enabled: HashSet<_> = toggles
+    let enabled: HashSet<_> = ORDER
         .into_iter()
-        .filter_map(|(id, enabled)| enabled.then_some(id))
+        .filter(|id| component_enabled(*id, config))
         .collect();
     if explicit_order && let Some(disabled) = order.iter().find(|id| !enabled.contains(id)) {
         anyhow::bail!("layout references disabled component {}", disabled.as_str());
@@ -97,6 +100,24 @@ fn build_settings(config: &ComponentsConfig) -> Result<DockSettings> {
         order,
         enabled,
     })
+}
+
+fn component_enabled(id: ComponentId, config: &ComponentsConfig) -> bool {
+    match id.as_str() {
+        "clock" => config.clock.enabled,
+        "controls" => config.controls.enabled,
+        "connectivity" => config.connectivity.enabled,
+        #[cfg(target_os = "linux")]
+        "packages" => config.packages.enabled,
+        "focus" => config.focus.enabled,
+        "media" => config.media.enabled,
+        "system-status" => config.system_status.enabled,
+        "weather" => config.weather.enabled,
+        #[cfg(target_os = "linux")]
+        "agents" => config.agents.enabled,
+        "calendar-events" => config.calendar_events.enabled,
+        _ => false,
+    }
 }
 
 fn settings() -> DockSettings {
@@ -131,16 +152,24 @@ pub fn registry() -> Result<ComponentRegistry> {
             }
         };
     }
-    register!(ORDER[0], clock::Clock);
-    register!(ORDER[1], controls::Controls);
-    register!(ORDER[2], connectivity::Connectivity);
-    register!(ORDER[3], packages::Packages);
-    register!(ORDER[4], focus::Focus);
-    register!(ORDER[5], media::Media);
-    register!(ORDER[6], system_status::SystemStatus);
-    register!(ORDER[7], weather::Weather);
-    register!(ORDER[8], agents::Agents);
-    register!(ORDER[9], calendar_events::CalendarEvents);
+    register!(ComponentId::new("clock"), clock::Clock);
+    register!(ComponentId::new("controls"), controls::Controls);
+    register!(ComponentId::new("connectivity"), connectivity::Connectivity);
+    #[cfg(target_os = "linux")]
+    register!(ComponentId::new("packages"), packages::Packages);
+    register!(ComponentId::new("focus"), focus::Focus);
+    register!(ComponentId::new("media"), media::Media);
+    register!(
+        ComponentId::new("system-status"),
+        system_status::SystemStatus
+    );
+    register!(ComponentId::new("weather"), weather::Weather);
+    #[cfg(target_os = "linux")]
+    register!(ComponentId::new("agents"), agents::Agents);
+    register!(
+        ComponentId::new("calendar-events"),
+        calendar_events::CalendarEvents
+    );
     Ok(registry)
 }
 
@@ -148,9 +177,11 @@ pub(crate) fn update_snapshot() -> String {
     let mut html = controls::update_fragment();
     html.push_str(&connectivity::update_fragment());
     html.push_str(&media::update_fragment());
+    #[cfg(target_os = "linux")]
     html.push_str(&packages::update_fragment());
     html.push_str(&focus::oob_fragment());
     html.push_str(&weather::update_fragment());
+    #[cfg(target_os = "linux")]
     html.push_str(&agents::update_fragment());
     html.push_str(&calendar_events::update_fragment());
     html.push_str(&media::spectrum_fragment());
@@ -250,19 +281,88 @@ mod tests {
         assert!(build_settings(&config).is_err());
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
-    fn composes_all_ten_dock_components() {
+    fn linux_default_order_contains_all_components() {
+        assert_eq!(
+            ORDER.map(ComponentId::as_str),
+            [
+                "clock",
+                "controls",
+                "connectivity",
+                "packages",
+                "focus",
+                "media",
+                "system-status",
+                "weather",
+                "agents",
+                "calendar-events",
+            ]
+        );
+        assert_eq!(
+            registry()
+                .unwrap()
+                .components()
+                .iter()
+                .map(|component| component.id().as_str())
+                .collect::<Vec<_>>(),
+            ORDER.map(ComponentId::as_str)
+        );
+        let dock = compose().unwrap();
+        assert!(dock.dashboard.contains(r#"id="packages-card""#));
+        assert!(dock.dashboard.contains(r#"id="agent-card""#));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_default_order_contains_only_supported_components() {
+        assert_eq!(
+            ORDER.map(ComponentId::as_str),
+            [
+                "clock",
+                "controls",
+                "connectivity",
+                "focus",
+                "media",
+                "system-status",
+                "weather",
+                "calendar-events",
+            ]
+        );
+        let settings = build_settings(&ComponentsConfig::default()).unwrap();
+        assert!(!settings.enabled.contains(&ComponentId::new("packages")));
+        assert!(!settings.order.contains(&ComponentId::new("packages")));
+        let registry = registry().unwrap();
+        assert_eq!(
+            registry
+                .components()
+                .iter()
+                .map(|component| component.id().as_str())
+                .collect::<Vec<_>>(),
+            ORDER.map(ComponentId::as_str)
+        );
+        assert!(
+            !registry
+                .components()
+                .iter()
+                .any(|component| component.id() == ComponentId::new("packages"))
+        );
+        let dock = compose().unwrap();
+        assert!(!dock.dashboard.contains(r#"id="packages-card""#));
+        assert!(!dock.dashboard.contains(r#"id="agent-card""#));
+    }
+
+    #[test]
+    fn composes_platform_dock_components() {
         let dock = compose().unwrap();
         for element in [
             "clock-card",
             "controls-card",
             "bluetooth-card",
-            "packages-card",
             "focus-card",
             "media-card",
             "system-card",
             "weather-card",
-            "agent-card",
             "calendar-events-card",
         ] {
             assert!(dock.dashboard.contains(&format!(r#"id="{element}""#)));

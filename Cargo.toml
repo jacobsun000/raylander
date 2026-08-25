@@ -9,12 +9,68 @@ askama = "0.14"
 axum = { version = "0.8", features = ["ws"] }
 chrono = "0.4"
 clap = { version = "4.5", features = ["derive"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking"] }
 rustfft = "6.4"
-libpulse-binding = "2.30"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["rt", "net", "time", "sync"] }
 toml = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libpulse-binding = "2.30"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 zbus = { version = "5.14", default-features = false, features = ["async-io", "blocking-api"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
+windows = { version = "0.62", features = [
+    "Data_Xml_Dom",
+    "Devices_Bluetooth",
+    "Devices_Bluetooth_Advertisement",
+    "Devices_Bluetooth_GenericAttributeProfile",
+    "Devices_Enumeration",
+    "Devices_Radios",
+    "Foundation",
+    "Foundation_Collections",
+    "Media",
+    "Media_Control",
+    "Media_Core",
+    "Media_Playback",
+    "Networking",
+    "Networking_Connectivity",
+    "Networking_NetworkOperators",
+    "Storage_Streams",
+    "System",
+    "System_Power",
+    "UI",
+    "UI_ViewManagement",
+    "Win32_Devices_Bluetooth",
+    "Win32_Devices_Communication",
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Devices_Display",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_Media_Multimedia",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_NetworkManagement_WiFi",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Ole",
+    "Win32_System_Performance",
+    "Win32_System_Power",
+    "Win32_System_ProcessStatus",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
+] }
