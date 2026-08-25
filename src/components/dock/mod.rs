@@ -9,12 +9,12 @@ use anyhow::Result;
 
 use crate::config::ComponentsConfig;
 
-use super::{
-    ComponentId, ComponentRegistry, Layout, calendar_events, clock, connectivity, controls, focus,
-    media, system_status, weather,
-};
 #[cfg(target_os = "linux")]
-use super::{agents, packages};
+use super::packages;
+use super::{
+    ComponentId, ComponentRegistry, Layout, agents, calendar_events, clock, connectivity, controls,
+    focus, media, system_status, weather,
+};
 
 pub(crate) mod server;
 
@@ -33,7 +33,7 @@ const ORDER: [ComponentId; 10] = [
 ];
 
 #[cfg(target_os = "windows")]
-const ORDER: [ComponentId; 8] = [
+const ORDER: [ComponentId; 9] = [
     ComponentId::new("clock"),
     ComponentId::new("controls"),
     ComponentId::new("connectivity"),
@@ -41,6 +41,7 @@ const ORDER: [ComponentId; 8] = [
     ComponentId::new("media"),
     ComponentId::new("system-status"),
     ComponentId::new("weather"),
+    ComponentId::new("agents"),
     ComponentId::new("calendar-events"),
 ];
 
@@ -113,7 +114,6 @@ fn component_enabled(id: ComponentId, config: &ComponentsConfig) -> bool {
         "media" => config.media.enabled,
         "system-status" => config.system_status.enabled,
         "weather" => config.weather.enabled,
-        #[cfg(target_os = "linux")]
         "agents" => config.agents.enabled,
         "calendar-events" => config.calendar_events.enabled,
         _ => false,
@@ -133,6 +133,10 @@ fn settings() -> DockSettings {
             enabled: settings.enabled.clone(),
         },
     )
+}
+
+pub(crate) fn is_component_enabled(id: ComponentId) -> bool {
+    settings().enabled.contains(&id)
 }
 
 pub struct DockComposition {
@@ -164,7 +168,6 @@ pub fn registry() -> Result<ComponentRegistry> {
         system_status::SystemStatus
     );
     register!(ComponentId::new("weather"), weather::Weather);
-    #[cfg(target_os = "linux")]
     register!(ComponentId::new("agents"), agents::Agents);
     register!(
         ComponentId::new("calendar-events"),
@@ -174,18 +177,26 @@ pub fn registry() -> Result<ComponentRegistry> {
 }
 
 pub(crate) fn update_snapshot() -> String {
-    let mut html = controls::update_fragment();
-    html.push_str(&connectivity::update_fragment());
-    html.push_str(&media::update_fragment());
+    let settings = settings();
+    let mut html = String::new();
+    macro_rules! push_if_enabled {
+        ($id:literal, $fragment:expr) => {
+            if settings.enabled.contains(&ComponentId::new($id)) {
+                html.push_str(&$fragment);
+            }
+        };
+    }
+    push_if_enabled!("controls", controls::update_fragment());
+    push_if_enabled!("connectivity", connectivity::update_fragment());
+    push_if_enabled!("media", media::update_fragment());
     #[cfg(target_os = "linux")]
-    html.push_str(&packages::update_fragment());
-    html.push_str(&focus::oob_fragment());
-    html.push_str(&weather::update_fragment());
-    #[cfg(target_os = "linux")]
-    html.push_str(&agents::update_fragment());
-    html.push_str(&calendar_events::update_fragment());
-    html.push_str(&media::spectrum_fragment());
-    html.push_str(&system_status::update_fragment());
+    push_if_enabled!("packages", packages::update_fragment());
+    push_if_enabled!("focus", focus::oob_fragment());
+    push_if_enabled!("weather", weather::update_fragment());
+    push_if_enabled!("agents", agents::update_fragment());
+    push_if_enabled!("calendar-events", calendar_events::update_fragment());
+    push_if_enabled!("media", media::spectrum_fragment());
+    push_if_enabled!("system-status", system_status::update_fragment());
     html
 }
 
@@ -326,6 +337,7 @@ mod tests {
                 "media",
                 "system-status",
                 "weather",
+                "agents",
                 "calendar-events",
             ]
         );
@@ -349,7 +361,7 @@ mod tests {
         );
         let dock = compose().unwrap();
         assert!(!dock.dashboard.contains(r#"id="packages-card""#));
-        assert!(!dock.dashboard.contains(r#"id="agent-card""#));
+        assert!(dock.dashboard.contains(r#"id="agent-card""#));
     }
 
     #[test]

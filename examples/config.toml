@@ -5,14 +5,17 @@ port = 8030
 
 [components.dock-layout]
 columns = 2
-# Omit order to use the platform default. Windows omits the unsupported
-# packages and agents components; packages remains available on Linux.
+# Leave order empty (or omit it) to use the platform default. Agents is
+# available on Linux and Windows; packages remains unsupported on Windows.
 order = []
 
 [components.weather]
 enabled = true
 latitude = "30.2672"
 longitude = "-97.7431"
+
+[components.agents]
+enabled = true
 
 [components.calendar-events]
 enabled = true

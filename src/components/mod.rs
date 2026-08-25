@@ -8,7 +8,7 @@ use std::{collections::HashSet, sync::Arc};
 use anyhow::{Result, bail};
 use axum::Router;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) mod agents;
 pub(crate) mod calendar_events;
 pub(crate) mod clock;

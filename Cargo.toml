@@ -2,6 +2,15 @@
 name = "raylander"
 version = "0.1.0"
 edition = "2024"
+default-run = "raylander"
+
+[[bin]]
+name = "raylander"
+path = "src/main.rs"
+
+[[bin]]
+name = "raylander-tray"
+path = "src/bin/raylander-tray.rs"
 
 [dependencies]
 anyhow = "1.0"
@@ -62,6 +71,7 @@ windows = { version = "0.62", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
+    "Win32_System_LibraryLoader",
     "Win32_System_Ole",
     "Win32_System_Performance",
     "Win32_System_Power",

@@ -106,16 +106,59 @@ impl Default for ExternalDockConfig {
     }
 }
 
-pub fn config_path() -> PathBuf {
-    let root = env::var_os("XDG_CONFIG_HOME")
+pub fn config_path() -> Result<PathBuf> {
+    Ok(config_root()?.join(config_relative_path()))
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn roaming_app_data_root() -> Result<PathBuf> {
+    let root = env::var_os("APPDATA")
+        .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-        .unwrap_or_else(|| PathBuf::from("."));
-    root.join("raylander/config.toml")
+        .or_else(|| {
+            env::var_os("USERPROFILE")
+                .filter(|value| !value.is_empty())
+                .map(|profile| PathBuf::from(profile).join("AppData").join("Roaming"))
+        })
+        .context("APPDATA and USERPROFILE are both unset")?;
+    anyhow::ensure!(
+        root.is_absolute(),
+        "Windows roaming AppData path must be absolute: {}",
+        root.display()
+    );
+    Ok(root)
+}
+
+#[cfg(target_os = "windows")]
+fn config_root() -> Result<PathBuf> {
+    roaming_app_data_root()
+}
+
+#[cfg(target_os = "windows")]
+fn config_relative_path() -> &'static str {
+    "Raylander/config.toml"
+}
+
+#[cfg(not(target_os = "windows"))]
+fn config_root() -> Result<PathBuf> {
+    Ok(env::var_os("XDG_CONFIG_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("HOME")
+                .filter(|value| !value.is_empty())
+                .map(|home| PathBuf::from(home).join(".config"))
+        })
+        .unwrap_or_else(|| PathBuf::from(".")))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn config_relative_path() -> &'static str {
+    "raylander/config.toml"
 }
 
 pub fn load() -> Result<Config> {
-    let path = config_path();
+    let path = config_path()?;
     if !path.exists() {
         return Ok(Config::default());
     }

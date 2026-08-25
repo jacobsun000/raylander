@@ -21,10 +21,10 @@ use axum::{
 use tokio::sync::{broadcast, oneshot};
 
 #[cfg(target_os = "linux")]
-use crate::components::{agents, packages};
+use crate::components::packages;
 use crate::{
     components::{
-        calendar_events, connectivity, controls, dock, focus, media, system_status, weather,
+        agents, calendar_events, connectivity, controls, dock, focus, media, system_status, weather,
     },
     config::ComponentsConfig,
 };
@@ -94,9 +94,10 @@ impl WebServer {
         });
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server_config = config.clone();
         let thread = thread::Builder::new()
             .name("raylander-web".into())
-            .spawn(move || run(address, shutdown_rx, ready_tx))
+            .spawn(move || run(address, server_config, shutdown_rx, ready_tx))
             .context("failed to start external dock server thread")?;
 
         ready_rx
@@ -121,7 +122,12 @@ impl Drop for WebServer {
     }
 }
 
-fn run(address: SocketAddr, shutdown: oneshot::Receiver<()>, ready: mpsc::SyncSender<Result<()>>) {
+fn run(
+    address: SocketAddr,
+    config: ComponentsConfig,
+    shutdown: oneshot::Receiver<()>,
+    ready: mpsc::SyncSender<Result<()>>,
+) {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -168,7 +174,7 @@ fn run(address: SocketAddr, shutdown: oneshot::Receiver<()>, ready: mpsc::SyncSe
                 }
             })
             .expect("failed to start dock event renderer");
-        let component_tasks = start_component_tasks(component_context);
+        let component_tasks = start_component_tasks(component_context, &config);
         thread::Builder::new()
             .name("raylander-dock-warmup".into())
             .spawn(|| {
@@ -249,7 +255,9 @@ async fn websocket(upgrade: WebSocketUpgrade) -> impl IntoResponse {
 }
 
 async fn display_power() -> StatusCode {
-    if let Some(transport) = TRANSPORT.get() {
+    if dock::is_component_enabled(crate::components::ComponentId::new("controls"))
+        && let Some(transport) = TRANSPORT.get()
+    {
         transport.broadcast(controls::display_power_fragment());
     }
     StatusCode::NO_CONTENT
@@ -287,113 +295,141 @@ async fn send_time(mut socket: WebSocket) {
     }
 }
 
-fn start_component_tasks(context: ComponentContext) -> Vec<JoinHandle<()>> {
+fn start_component_tasks(
+    context: ComponentContext,
+    config: &ComponentsConfig,
+) -> Vec<JoinHandle<()>> {
     let notify = |key, render, context: &ComponentContext| {
         let context = context.clone();
         move || context.invalidate(key, render)
     };
     let shutdown = &context.shutdown;
-    #[cfg_attr(target_os = "windows", allow(unused_mut))]
-    let mut tasks = vec![
-        controls::observe_volume(
+    let mut tasks = Vec::new();
+    if config.controls.enabled {
+        tasks.push(controls::observe_volume(
             Arc::clone(shutdown),
             notify("controls/volume", controls::volume_fragment, &context),
-        ),
-        media::observe_media(
+        ));
+    }
+    if config.media.enabled {
+        tasks.push(media::observe_media(
             Arc::clone(shutdown),
             notify("media/main", media::update_fragment, &context),
-        ),
-        connectivity::observe_bluetooth(Arc::clone(shutdown), {
+        ));
+        tasks.push(media::observe_spectrum(
+            Arc::clone(shutdown),
+            notify("media/spectrum", media::spectrum_fragment, &context),
+        ));
+    }
+    if config.connectivity.enabled {
+        tasks.push(connectivity::observe_bluetooth(Arc::clone(shutdown), {
             let context = context.clone();
             move || {
                 connectivity::invalidate();
                 context.invalidate("connectivity/main", connectivity::update_fragment);
             }
-        }),
-        connectivity::observe_input_method(
+        }));
+        tasks.push(connectivity::observe_input_method(
             Arc::clone(shutdown),
             notify(
                 "connectivity/input-method",
                 connectivity::input_method_fragment,
                 &context,
             ),
-        ),
-        focus::observe(
+        ));
+    }
+    if config.focus.enabled {
+        let controls_enabled = config.controls.enabled;
+        let monitor_context = context.clone();
+        tasks.push(focus::observe(
             Arc::clone(shutdown),
             notify("focus/main", focus::oob_fragment, &context),
-            notify(
-                "controls/display-power",
-                controls::update_fragment,
-                &context,
-            ),
-        ),
-        calendar_events::observe(
+            move || {
+                if controls_enabled {
+                    monitor_context.invalidate("controls/display-power", controls::update_fragment);
+                }
+            },
+        ));
+    }
+    if config.calendar_events.enabled {
+        tasks.push(calendar_events::observe(
             Arc::clone(shutdown),
             notify(
                 "calendar-events/main",
                 calendar_events::update_fragment,
                 &context,
             ),
-        ),
-        system_status::observe(
+        ));
+    }
+    if config.system_status.enabled {
+        tasks.push(system_status::observe(
             Arc::clone(shutdown),
             notify(
                 "system-status/main",
                 system_status::update_fragment,
                 &context,
             ),
-        ),
-        media::observe_spectrum(
-            Arc::clone(shutdown),
-            notify("media/spectrum", media::spectrum_fragment, &context),
-        ),
-    ];
-    #[cfg(target_os = "linux")]
-    tasks.extend([
-        agents::observe(
+        ));
+    }
+    if config.agents.enabled {
+        tasks.push(agents::observe(
             Arc::clone(shutdown),
             notify("agents/main", agents::update_fragment, &context),
-        ),
-        packages::observe(
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    if config.packages.enabled {
+        tasks.push(packages::observe(
             Arc::clone(shutdown),
             notify("packages/main", packages::update_fragment, &context),
-        ),
-    ]);
+        ));
+    }
     tasks
 }
 
 fn initial_invalidations() -> Vec<Invalidation> {
-    vec![
-        Invalidation {
-            key: "controls/volume",
-            render: controls::volume_fragment,
-        },
-        Invalidation {
-            key: "media/main",
-            render: media::update_fragment,
-        },
-        Invalidation {
-            key: "connectivity/input-method",
-            render: connectivity::input_method_fragment,
-        },
-        Invalidation {
-            key: "focus/main",
-            render: focus::oob_fragment,
-        },
-        Invalidation {
-            key: "controls/display-power",
-            render: controls::update_fragment,
-        },
-        #[cfg(target_os = "linux")]
-        Invalidation {
-            key: "agents/main",
-            render: agents::update_fragment,
-        },
-        Invalidation {
-            key: "calendar-events/main",
-            render: calendar_events::update_fragment,
-        },
-    ]
+    let mut invalidations = Vec::new();
+    let mut push = |component, key, render| {
+        if dock::is_component_enabled(component) {
+            invalidations.push(Invalidation { key, render });
+        }
+    };
+    push(
+        crate::components::ComponentId::new("controls"),
+        "controls/volume",
+        controls::volume_fragment,
+    );
+    push(
+        crate::components::ComponentId::new("media"),
+        "media/main",
+        media::update_fragment,
+    );
+    push(
+        crate::components::ComponentId::new("connectivity"),
+        "connectivity/input-method",
+        connectivity::input_method_fragment,
+    );
+    push(
+        crate::components::ComponentId::new("focus"),
+        "focus/main",
+        focus::oob_fragment,
+    );
+    push(
+        crate::components::ComponentId::new("controls"),
+        "controls/display-power",
+        controls::update_fragment,
+    );
+    push(
+        crate::components::ComponentId::new("agents"),
+        "agents/main",
+        agents::update_fragment,
+    );
+    push(
+        crate::components::ComponentId::new("calendar-events"),
+        "calendar-events/main",
+        calendar_events::update_fragment,
+    );
+    invalidations
 }
 
 fn stylesheet(source: &'static str) -> impl IntoResponse {

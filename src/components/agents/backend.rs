@@ -3,13 +3,7 @@ use std::{collections::HashMap, process::Command};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AgentStatus {
-    pub workspace: String,
-    pub pane: String,
-    pub pane_id: String,
-    pub status: String,
-}
+use super::{AgentState, AgentStatus};
 
 #[derive(Deserialize)]
 struct Response<T> {
@@ -46,10 +40,10 @@ struct HyprClient {
     title: String,
 }
 
-pub struct HerdrBackend;
+pub(super) struct HerdrBackend;
 
 impl HerdrBackend {
-    pub fn agents(&self) -> Result<Vec<AgentStatus>> {
+    pub(super) fn agents(&self) -> Result<Vec<AgentStatus>> {
         let workspaces: Response<WorkspaceList> = query(&["workspace", "list"])?;
         let workspaces: HashMap<_, _> = workspaces
             .result
@@ -72,14 +66,14 @@ impl HerdrBackend {
                     .rsplit_once(":p")
                     .map_or(agent.pane_id.clone(), |(_, pane)| pane.to_owned()),
                 pane_id: agent.pane_id,
-                status: agent.agent_status,
+                status: AgentState::from_herdr(&agent.agent_status),
             })
             .collect::<Vec<_>>();
         agents.sort_by(|a, b| (&a.workspace, &a.pane).cmp(&(&b.workspace, &b.pane)));
         Ok(agents)
     }
 
-    pub fn focus(&self, pane_id: &str) -> Result<()> {
+    pub(super) fn focus(&self, pane_id: &str) -> Result<()> {
         let output = Command::new("herdr")
             .args(["agent", "focus", pane_id])
             .output()
