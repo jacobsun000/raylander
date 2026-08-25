@@ -1,6 +1,7 @@
-use std::process::Command;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use reqwest::blocking::Client;
 
 pub struct WeatherBackend;
 
@@ -24,23 +25,26 @@ impl WeatherBackend {
     }
 
     fn fetch(&self, url: &str, timeout_seconds: u8, user_agent: Option<&str>) -> Result<Vec<u8>> {
-        let mut command = Command::new("curl");
-        command.args([
-            "--fail",
-            "--silent",
-            "--max-time",
-            &timeout_seconds.to_string(),
-        ]);
+        let client = Client::builder()
+            .timeout(Duration::from_secs(u64::from(timeout_seconds)))
+            .build()
+            .context("failed to create weather HTTP client")?;
+        let mut request = client.get(url);
         if let Some(user_agent) = user_agent {
-            command.args(["--user-agent", user_agent]);
+            request = request.header(reqwest::header::USER_AGENT, user_agent);
         }
-        let output = command
-            .arg(url)
-            .output()
+        let response = request
+            .send()
             .with_context(|| format!("failed to execute weather request for {url}"))?;
-        if !output.status.success() {
-            bail!("weather request exited with {} for {url}", output.status);
+        if !response.status().is_success() {
+            bail!(
+                "weather request failed with HTTP status {} for {url}",
+                response.status()
+            );
         }
-        Ok(output.stdout)
+        Ok(response
+            .bytes()
+            .with_context(|| format!("failed to read weather response for {url}"))?
+            .to_vec())
     }
 }

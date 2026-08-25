@@ -1,7 +1,8 @@
-use std::process::Command;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use reqwest::blocking::Client;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CalendarEvent {
@@ -17,23 +18,23 @@ pub struct GoogleCalendarBackend;
 
 impl GoogleCalendarBackend {
     pub fn events(&self, urls: &[String]) -> Result<Vec<CalendarEvent>> {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .context("failed to create Google Calendar HTTP client")?;
         let mut events = Vec::new();
         for url in urls {
-            let output = Command::new("curl")
-                .args([
-                    "--fail",
-                    "--silent",
-                    "--show-error",
-                    "--max-time",
-                    "10",
-                    url,
-                ])
-                .output()
+            let response = client
+                .get(url)
+                .send()
                 .context("failed to fetch Google Calendar")?;
-            if !output.status.success() {
+            if !response.status().is_success() {
                 bail!("Google Calendar request failed");
             }
-            events.extend(parse_ics(&String::from_utf8_lossy(&output.stdout)));
+            let bytes = response
+                .bytes()
+                .context("failed to read Google Calendar response")?;
+            events.extend(parse_ics(&String::from_utf8_lossy(&bytes)));
         }
         events.sort_by_key(|event| event.start);
         events.dedup_by(|a, b| a.start == b.start && a.title == b.title);
