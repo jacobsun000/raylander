@@ -183,7 +183,7 @@ async fn set_awake(Path(active): Path<bool>) -> StatusCode {
         return StatusCode::SERVICE_UNAVAILABLE;
     };
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(30 * 60)).await;
+        tokio::time::sleep(Duration::from_secs(60 * 60)).await;
         AwakeBackend.expire(generation);
     });
     StatusCode::NO_CONTENT

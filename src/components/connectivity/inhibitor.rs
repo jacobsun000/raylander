@@ -28,7 +28,7 @@ impl AwakeBackend {
                         "--what=idle",
                         "--mode=block",
                         "--who=Raylander",
-                        "--why=30-minute awake timer",
+                        "--why=1-hour awake timer",
                         "sleep",
                         "1800",
                     ])

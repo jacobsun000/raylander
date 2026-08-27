@@ -14,7 +14,7 @@ globalThis.renderAwake = () => {
 
 globalThis.keepAwake = () => {
   const active = awakeUntil > Date.now();
-  awakeUntil = active ? 0 : Date.now() + 30 * 60 * 1000;
+  awakeUntil = active ? 0 : Date.now() + 60 * 60 * 1000;
   if (active) {
     localStorage.removeItem("raylander-awake-until");
     post("/components/connectivity/awake/false");
