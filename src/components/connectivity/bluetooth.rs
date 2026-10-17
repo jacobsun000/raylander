@@ -42,6 +42,7 @@ pub struct BluetoothDevice {
     pub paired: bool,
     pub connected: bool,
     pub trusted: bool,
+    pub audio_output: bool,
     pub battery: Option<BluetoothBattery>,
 }
 
@@ -75,6 +76,13 @@ pub struct BluetoothBackend;
 
 impl BluetoothBackend {
     pub async fn state(&self) -> Result<BluetoothState> {
+        let mut state = self.state_without_batteries().await?;
+        fill_missing_batteries(&mut state.devices);
+        Ok(state)
+    }
+
+    /// Audio selection does not need the optional, process-backed battery lookup.
+    pub async fn state_without_batteries(&self) -> Result<BluetoothState> {
         let connection = match Connection::system().await {
             Ok(connection) => connection,
             Err(error) => {
@@ -101,9 +109,7 @@ impl BluetoothBackend {
             }
             Err(error) => return Err(error).context("query BlueZ managed objects"),
         };
-        let mut state = parse_managed_objects(&objects);
-        fill_missing_batteries(&mut state.devices);
-        Ok(state)
+        Ok(parse_managed_objects(&objects))
     }
 
     /// Powers an adapter only when `adapter_path` currently identifies a BlueZ adapter.
@@ -197,7 +203,7 @@ impl BluetoothBackend {
 
     /// Connects or disconnects a known paired device. Unpaired devices are intentionally rejected.
     pub async fn set_device_connected(&self, device_path: &str, connected: bool) -> Result<()> {
-        let state = self.state().await?;
+        let state = self.state_without_batteries().await?;
         ensure_available(&state)?;
         let device = state
             .devices
@@ -222,6 +228,13 @@ impl BluetoothBackend {
             .await
             .with_context(|| format!("{method} Bluetooth device"))
     }
+}
+
+fn is_audio_output_uuid(uuid: &str) -> bool {
+    // A2DP Audio Sink, Headset, and Hands-Free (not the audio gateway roles).
+    ["0000110b", "00001108", "0000111e"]
+        .iter()
+        .any(|prefix| uuid.eq_ignore_ascii_case(&format!("{prefix}-0000-1000-8000-00805f9b34fb")))
 }
 
 fn ensure_available(state: &BluetoothState) -> Result<()> {
@@ -267,6 +280,10 @@ fn parse_managed_objects(objects: &ManagedObjects) -> BluetoothState {
                 paired: bool_property(properties, "Paired"),
                 connected: bool_property(properties, "Connected"),
                 trusted: bool_property(properties, "Trusted"),
+                audio_output: properties
+                    .get("UUIDs")
+                    .and_then(|value| <Vec<String>>::try_from(value.try_clone().ok()?).ok())
+                    .is_some_and(|uuids| uuids.iter().any(|uuid| is_audio_output_uuid(uuid))),
                 battery,
             });
         }
@@ -481,6 +498,13 @@ mod tests {
                             .unwrap(),
                         ),
                         ("Paired", OwnedValue::from(true)),
+                        (
+                            "UUIDs",
+                            OwnedValue::try_from(Value::from(vec![
+                                "0000110b-0000-1000-8000-00805f9b34fb",
+                            ]))
+                            .unwrap(),
+                        ),
                         ("Connected", OwnedValue::from(true)),
                     ]),
                 ),
@@ -498,7 +522,23 @@ mod tests {
         assert!(state.adapters[0].powered);
         assert_eq!(state.devices[0].name, "Headphones");
         assert!(state.devices[0].paired && state.devices[0].connected);
+        assert!(state.devices[0].audio_output);
         assert_eq!(state.devices[0].battery.unwrap().percentage, 73);
+    }
+
+    #[test]
+    fn audio_services_exclude_hid_and_audio_gateways() {
+        for uuid in ["0000110B", "00001108", "0000111e"] {
+            assert!(is_audio_output_uuid(&format!(
+                "{uuid}-0000-1000-8000-00805f9b34fb"
+            )));
+        }
+        for uuid in ["00001124", "0000110a", "0000111f", "00001112"] {
+            assert!(!is_audio_output_uuid(&format!(
+                "{uuid}-0000-1000-8000-00805f9b34fb"
+            )));
+        }
+        assert!(!is_audio_output_uuid("AirPods"));
     }
 
     #[test]
@@ -529,6 +569,7 @@ mod tests {
             adapter_path: None,
             address: "A0:AB:51:CF:F9:F2".into(),
             name: "DualSense Wireless Controller".into(),
+            audio_output: false,
             paired: true,
             connected: true,
             trusted: true,

@@ -23,6 +23,8 @@ use super::dock_component;
 
 pub(crate) mod audio;
 pub(crate) mod display;
+#[cfg(target_os = "linux")]
+mod outputs;
 
 dock_component!(Controls, "controls", GridSize::ONE_BY_ONE, routes());
 
@@ -32,10 +34,20 @@ static LAST_BRIGHTNESS: OnceLock<Mutex<Option<u8>>> = OnceLock::new();
 static BRIGHTNESS: OnceLock<Mutex<Option<(Instant, String)>>> = OnceLock::new();
 
 pub(crate) fn routes() -> Router {
-    Router::new()
+    let routes = Router::new()
         .route("/component.js", get(component_javascript))
         .route("/volume/{percent}", post(set_volume))
-        .route("/brightness/{percent}", post(set_brightness))
+        .route("/brightness/{percent}", post(set_brightness));
+    #[cfg(target_os = "linux")]
+    let routes = routes
+        .route("/audio/outputs", get(outputs::get_outputs))
+        .route("/audio/output", post(outputs::select_output));
+    #[cfg(not(target_os = "linux"))]
+    let routes = routes.route(
+        "/audio/outputs",
+        get(|| async { axum::Json(serde_json::json!({"supported": false})) }),
+    );
+    routes
 }
 
 async fn component_javascript() -> impl IntoResponse {
@@ -147,6 +159,10 @@ async fn set_volume(Path(percent): Path<u8>) -> StatusCode {
     if percent > 100 {
         return StatusCode::BAD_REQUEST;
     }
+    #[cfg(target_os = "linux")]
+    let Ok(_guard) = outputs::AUDIO_OPERATION.try_lock() else {
+        return StatusCode::CONFLICT;
+    };
     let result = tokio::task::spawn_blocking(move || WpctlBackend.set_percent(percent)).await;
     match result {
         Ok(Ok(())) => StatusCode::NO_CONTENT,

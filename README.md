@@ -5,7 +5,7 @@ Raylander is a long-running server for the external dock web interface. Linux us
 ## Requirements
 
 - Rust 1.90 or newer when building from source
-- Linux: PipeWire/WirePlumber with `wpctl`, PulseAudio compatibility, and the system utilities used by enabled dock controls (for example `playerctl`, `nmcli`, and `hyprctl`)
+- Linux: PipeWire/WirePlumber with `wpctl`, PulseAudio compatibility and `pactl`, and the system utilities used by enabled dock controls (for example `playerctl`, `nmcli`, and `hyprctl`)
 - Windows: a Codex client that supports user lifecycle hooks for agent runtime status; other enabled components use native Windows APIs where available
 
 ## Linux build and run
@@ -17,6 +17,8 @@ raylander daemon
 ```
 
 The console `daemon` behavior remains the normal Linux lifecycle. `display-power` sends the existing local display-power invalidation to a running daemon.
+
+The expanded volume panel lists system outputs and paired Bluetooth headphones, including AirPods. Select headphones to connect them and switch playback; pairing must already be complete and the headphones must be awake and within range. The panel waits up to 30 seconds for the Bluetooth audio output, sets it as the default, and moves existing PulseAudio-compatible playback streams. Switching back to speakers leaves the Bluetooth connection intact. This uses BlueZ and the existing audio server; no AirPods helper service or additional configuration is required.
 
 ## Windows
 

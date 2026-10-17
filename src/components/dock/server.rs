@@ -495,6 +495,8 @@ mod tests {
             paired: true,
             connected,
             trusted: true,
+            #[cfg(target_os = "linux")]
+            audio_output: false,
             battery: battery.map(|percentage| {
                 crate::components::connectivity::bluetooth::BluetoothBattery { percentage }
             }),
