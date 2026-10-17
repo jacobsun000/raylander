@@ -28,11 +28,12 @@ impl SystemStatusBackend {
 }
 
 fn usage_percent(total: u64, available: u64) -> u8 {
-    if total == 0 {
-        0
-    } else {
-        (total.saturating_sub(available).saturating_mul(100) / total).min(100) as u8
-    }
+    total
+        .saturating_sub(available)
+        .saturating_mul(100)
+        .checked_div(total)
+        .unwrap_or(0)
+        .min(100) as u8
 }
 
 fn cpu_usage(first: (u64, u64), second: (u64, u64)) -> u8 {

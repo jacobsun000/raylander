@@ -68,10 +68,12 @@ fn capture(sender: mpsc::SyncSender<[u8; BANDS]>, active: Arc<AtomicBool>) {
         let mut last_emit = Instant::now();
         while active.load(Ordering::Relaxed) && stdout.read_exact(&mut bytes).is_ok() {
             let mut samples = bytes
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .enumerate()
                 .map(|(index, bytes)| {
-                    let sample = f32::from_le_bytes(bytes.try_into().unwrap_or_default());
+                    let sample = f32::from_le_bytes(*bytes);
                     let window =
                         0.5 - 0.5 * (std::f32::consts::TAU * index as f32 / FFT_SIZE as f32).cos();
                     Complex::new(sample * window, 0.0)
